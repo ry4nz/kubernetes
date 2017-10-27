@@ -49,6 +49,7 @@ go_library(
         "//plugin/pkg/admission/security/podsecuritypolicy:go_default_library",
         "//plugin/pkg/admission/securitycontext/scdeny:go_default_library",
         "//plugin/pkg/admission/serviceaccount:go_default_library",
+        "//plugin/pkg/admission/signingpolicy:go_default_library",
         "//plugin/pkg/admission/storage/persistentvolume/label:go_default_library",
         "//plugin/pkg/admission/storage/persistentvolume/resize:go_default_library",
         "//plugin/pkg/admission/storage/storageclass/setdefault:go_default_library",

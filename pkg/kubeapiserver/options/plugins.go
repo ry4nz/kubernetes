@@ -47,6 +47,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/security/podsecuritypolicy"
 	"k8s.io/kubernetes/plugin/pkg/admission/securitycontext/scdeny"
 	"k8s.io/kubernetes/plugin/pkg/admission/serviceaccount"
+	"k8s.io/kubernetes/plugin/pkg/admission/signingpolicy"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/label"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/resize"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageclass/setdefault"
@@ -87,6 +88,7 @@ var AllOrderedPlugins = []string{
 	extendedresourcetoleration.PluginName,   // ExtendedResourceToleration
 	label.PluginName,                        // PersistentVolumeLabel
 	setdefault.PluginName,                   // DefaultStorageClass
+	signingpolicy.PluginName,                // CheckImageSigning
 	storageobjectinuseprotection.PluginName, // StorageObjectInUseProtection
 	gc.PluginName,                           // OwnerReferencesPermissionEnforcement
 	resize.PluginName,                       // PersistentVolumeClaimResize
@@ -124,6 +126,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	scdeny.Register(plugins)
 	serviceaccount.Register(plugins)
 	setdefault.Register(plugins)
+	signingpolicy.Register(plugins)
 	resize.Register(plugins)
 	storageobjectinuseprotection.Register(plugins)
 }
@@ -140,6 +143,7 @@ func DefaultOffAdmissionPlugins() sets.String {
 		mutatingwebhook.PluginName,          //MutatingAdmissionWebhook
 		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
 		resourcequota.PluginName,            //ResourceQuota
+		signingpolicy.PluginName,            // CheckImageSigning
 	)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
