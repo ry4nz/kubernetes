@@ -1,13 +1,17 @@
 package signingpolicy
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 
-	"crypto/tls"
 	"github.com/docker/go-connections/tlsconfig"
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,13 +38,13 @@ func Register(plugins *admission.Plugins) {
 		certDir := os.Getenv("CERT_DIR")
 		if certDir != "" {
 			tlsOptions := tlsconfig.Options{
-				CAFile:   certDir + rootCA,
-				CertFile: certDir + cert,
-				KeyFile:  certDir + key,
+				CAFile:   filepath.Join(certDir, rootCA),
+				CertFile: filepath.Join(certDir, cert),
+				KeyFile:  filepath.Join(certDir, key),
 			}
 			tlsConfig, err = tlsconfig.Client(tlsOptions)
 			if err != nil {
-				return nil,	err
+				return nil, err
 			}
 		}
 		transport := &http.Transport{
@@ -57,7 +61,7 @@ func Register(plugins *admission.Plugins) {
 type signingPolicy struct {
 	*admission.Handler
 	ucpLocation string
-	transport  *http.Transport
+	transport   *http.Transport
 }
 
 func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
@@ -66,6 +70,7 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 	user := attributes.GetUserInfo().GetName()
+	log.Debugf("the user is: %s", user)
 	pod, ok := attributes.GetObject().(*api.Pod)
 	if !ok {
 		return apierrors.NewBadRequest("Resource was marked with kind Pod but was unable to be converted")
@@ -100,7 +105,7 @@ func NewSignedImage(transport http.Transport) admission.Interface {
 	return &signingPolicy{
 		Handler:     admission.NewHandler(admission.Create, admission.Update),
 		ucpLocation: os.Getenv("UCP_URL"),
-		transport: &transport,
+		transport:   &transport,
 	}
 }
 

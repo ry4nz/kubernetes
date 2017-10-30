@@ -1,17 +1,17 @@
 package signingpolicy
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
-	"fmt"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
-	"net/http"
-	"net/http/httptest"
-	"os"
 )
 
 // TestAdmission verifies all create requests for pods result in every container's image pull policy
@@ -51,7 +51,7 @@ func TestAdmission(t *testing.T) {
 	handler := &signingPolicy{
 		Handler:     admission.NewHandler(admission.Create, admission.Update),
 		ucpLocation: os.Getenv("UCP_URL"),
-		transport:   &http.Transport{
+		transport: &http.Transport{
 			TLSClientConfig: nil,
 			// The default is 2 which is too small. We may need to
 			// adjust this value as we get results from load/stress
