@@ -51,12 +51,14 @@ func TestAdmission(t *testing.T) {
 	handler := &signingPolicy{
 		Handler:     admission.NewHandler(admission.Create, admission.Update),
 		ucpLocation: os.Getenv("UCP_URL"),
-		transport: &http.Transport{
-			TLSClientConfig: nil,
-			// The default is 2 which is too small. We may need to
-			// adjust this value as we get results from load/stress
-			// tests.
-			MaxIdleConnsPerHost: 5,
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: nil,
+				// The default is 2 which is too small. We may need to
+				// adjust this value as we get results from load/stress
+				// tests.
+				MaxIdleConnsPerHost: 5,
+			},
 		},
 	}
 	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
