@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 
 	"github.com/docker/go-connections/tlsconfig"
@@ -47,21 +46,24 @@ func Register(plugins *admission.Plugins) {
 				return nil, err
 			}
 		}
-		transport := &http.Transport{
-			TLSClientConfig: tlsConfig,
-			// The default is 2 which is too small. We may need to
-			// adjust this value as we get results from load/stress
-			// tests.
-			MaxIdleConnsPerHost: 5,
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+				// The default is 2 which is too small. We may need to
+				// adjust this value as we get results from load/stress
+				// tests.
+				MaxIdleConnsPerHost: 5,
+			},
 		}
-		return NewSignedImage(*transport), nil
+
+		return NewSignedImage(httpClient), nil
 	})
 }
 
 type signingPolicy struct {
 	*admission.Handler
 	ucpLocation string
-	transport   *http.Transport
+	httpClient  *http.Client
 }
 
 func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
@@ -100,19 +102,18 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 	return nil
 }
 
-func NewSignedImage(transport http.Transport) admission.Interface {
-	fmt.Printf("\n\n\n%s\n\n\n", os.Getenv("UCP_URL"))
+//NewSignedImage returns a signing policy handler
+func NewSignedImage(httpClient *http.Client) admission.Interface {
 	return &signingPolicy{
 		Handler:     admission.NewHandler(admission.Create, admission.Update),
 		ucpLocation: os.Getenv("UCP_URL"),
-		transport:   &transport,
+		httpClient:  httpClient,
 	}
 }
 
 func (a *signingPolicy) resolve(image, user string) (string, error) {
-
 	if a.ucpLocation == "" {
-		return "", errors.New("UCP is not configured")
+		return "", errors.New("unable to resolve image: UCP controller location not configured")
 	}
 	img, err := a.checkUCPSigningPolicy(image, user)
 	if err != nil {
@@ -125,26 +126,28 @@ func (a *signingPolicy) resolve(image, user string) (string, error) {
 }
 
 func (a *signingPolicy) checkUCPSigningPolicy(image, user string) (string, error) {
-	httpClient := &http.Client{
-		Transport: a.transport,
-	}
+
 	apiArgs := url.Values{}
 	apiArgs.Set("image", image)
 	apiArgs.Set("user", user)
-	req, err := httpClient.PostForm(a.ucpLocation+apiPath, apiArgs)
+	resp, err := a.httpClient.PostForm(a.ucpLocation+apiPath, apiArgs)
 	if err != nil {
 		return "", err
 	}
-	defer req.Body.Close()
+	defer resp.Body.Close()
 	//check status code
-	if req.StatusCode != http.StatusOK {
-		if req.StatusCode == http.StatusForbidden {
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden {
 			return "", nil
 
 		}
-		return "", fmt.Errorf("UCP returned http statuscode %s", req.StatusCode)
+		errMsg, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("UCP returned http statuscode %s", resp.StatusCode)
+		}
+		return "", fmt.Errorf("UCP returned http statuscode %s: %s", resp.StatusCode, errMsg)
 	}
-	img, err := ioutil.ReadAll(req.Body)
+	img, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
