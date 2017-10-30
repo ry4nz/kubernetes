@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"io/ioutil"
-	"os"
-
+	"crypto/tls"
 	"github.com/docker/go-connections/tlsconfig"
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -18,10 +16,10 @@ import (
 )
 
 const (
-	key    = "key.pem"
-	cert   = "cert.pem"
-	rootCA = "ca.pem"
-	apiUrl = "/api/dct/resolveimage/"
+	key     = "key.pem"
+	cert    = "cert.pem"
+	rootCA  = "ca.pem"
+	apiPath = "/api/dct/resolveimage/"
 )
 
 const (
@@ -30,13 +28,36 @@ const (
 
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
-	plugins.Register(PluginName, func(config io.Reader) (admission.Interface, error) {
-		return NewSignedImage(), nil
+	plugins.Register("CheckImageSigning", func(config io.Reader) (admission.Interface, error) {
+		var tlsConfig *tls.Config
+		var err error
+		certDir := os.Getenv("CERT_DIR")
+		if certDir != "" {
+			tlsOptions := tlsconfig.Options{
+				CAFile:   certDir + rootCA,
+				CertFile: certDir + cert,
+				KeyFile:  certDir + key,
+			}
+			tlsConfig, err = tlsconfig.Client(tlsOptions)
+			if err != nil {
+				return nil,	err
+			}
+		}
+		transport := &http.Transport{
+			TLSClientConfig: tlsConfig,
+			// The default is 2 which is too small. We may need to
+			// adjust this value as we get results from load/stress
+			// tests.
+			MaxIdleConnsPerHost: 5,
+		}
+		return NewSignedImage(*transport), nil
 	})
 }
 
 type signingPolicy struct {
 	*admission.Handler
+	ucpLocation string
+	transport  *http.Transport
 }
 
 func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
@@ -50,77 +71,62 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 		return apierrors.NewBadRequest("Resource was marked with kind Pod but was unable to be converted")
 	}
 
-	for _, container := range pod.Spec.InitContainers {
+	for i, container := range pod.Spec.InitContainers {
 		image := container.Image
-		resolved, err := resolve(image, user)
+		resolved, err := a.resolve(image, user)
 		if err != nil {
 			log.Infof("Reject image %s", image)
 			return err
 		}
 		log.Infof("Accept image %s, using now %s", image, resolved)
-		container.Image = resolved
+		pod.Spec.InitContainers[i].Image = resolved
 	}
 
-	for _, container := range pod.Spec.Containers {
+	for i, container := range pod.Spec.Containers {
 		image := container.Image
-		resolved, err := resolve(image, user)
+		resolved, err := a.resolve(image, user)
 		if err != nil {
 			log.Infof("Reject image %s", image)
 			return err
 		}
 		log.Infof("Accept image %s, using now %s", image, resolved)
-		container.Image = resolved
+		pod.Spec.Containers[i].Image = resolved
 	}
 	return nil
 }
 
-func NewSignedImage() admission.Interface {
+func NewSignedImage(transport http.Transport) admission.Interface {
+	fmt.Printf("\n\n\n%s\n\n\n", os.Getenv("UCP_URL"))
 	return &signingPolicy{
-		Handler: admission.NewHandler(admission.Create, admission.Update),
+		Handler:     admission.NewHandler(admission.Create, admission.Update),
+		ucpLocation: os.Getenv("UCP_URL"),
+		transport: &transport,
 	}
 }
 
-func resolve(image, user string) (string, error) {
-	ucpLocation := os.Getenv("UCP_URL")
-	if ucpLocation == "" {
+func (a *signingPolicy) resolve(image, user string) (string, error) {
+
+	if a.ucpLocation == "" {
 		return "", errors.New("UCP is not configured")
 	}
-	img, err := checkUCPSigningPolicy(image, ucpLocation, user)
+	img, err := a.checkUCPSigningPolicy(image, user)
 	if err != nil {
 		return "", err
 	}
 	if img == "" {
-		return "", errors.New(image + " is not signed")
+		return "", fmt.Errorf("%s is not signed", image)
 	}
-	//format image
 	return img, nil
 }
 
-func checkUCPSigningPolicy(image, ucpLocation, user string) (string, error) {
-	certDir := os.Getenv("CERT_DIR")
-	tlsOptions := tlsconfig.Options{
-		CAFile:   certDir + rootCA,
-		CertFile: certDir + cert,
-		KeyFile:  certDir + key,
-	}
-	tlsConfig, err := tlsconfig.Client(tlsOptions)
-	if err != nil {
-		return "", err
-	}
-
+func (a *signingPolicy) checkUCPSigningPolicy(image, user string) (string, error) {
 	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-			// The default is 2 which is too small. We may need to
-			// adjust this value as we get results from load/stress
-			// tests.
-			MaxIdleConnsPerHost: 5,
-		},
+		Transport: a.transport,
 	}
 	apiArgs := url.Values{}
 	apiArgs.Set("image", image)
 	apiArgs.Set("user", user)
-	req, err := httpClient.PostForm(ucpLocation+apiUrl, apiArgs)
+	req, err := httpClient.PostForm(a.ucpLocation+apiPath, apiArgs)
 	if err != nil {
 		return "", err
 	}
