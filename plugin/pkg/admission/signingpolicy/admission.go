@@ -22,7 +22,7 @@ const (
 	key     = "key.pem"
 	cert    = "cert.pem"
 	rootCA  = "ca.pem"
-	apiPath = "/api/dct/resolveimage/"
+	apiPath = "/api/dct/resolveimage"
 )
 
 const (
@@ -145,7 +145,7 @@ func (a *signingPolicy) checkUCPSigningPolicy(image, user string) (string, error
 		if err != nil {
 			return "", fmt.Errorf("UCP returned http statuscode %s", resp.StatusCode)
 		}
-		return "", fmt.Errorf("UCP returned http statuscode %s: %s", resp.StatusCode, errMsg)
+		return "", fmt.Errorf("UCP returned http statuscode %d: %s", resp.StatusCode, errMsg)
 	}
 	img, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
