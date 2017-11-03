@@ -52,6 +52,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/resize"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageclass/setdefault"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageobjectinuseprotection"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucpauthz"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucpnodeselector"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -97,6 +98,7 @@ var AllOrderedPlugins = []string{
 	validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
 	resourcequota.PluginName,                // ResourceQuota
 	deny.PluginName,                         // AlwaysDeny
+	ucpauthz.PluginName,                     // UCPAuthorization
 	ucpnodeselector.PluginName,              // UCPNodeSelector
 }
 
@@ -131,6 +133,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	signingpolicy.Register(plugins)
 	resize.Register(plugins)
 	storageobjectinuseprotection.Register(plugins)
+	ucpauthz.Register(plugins)
 	ucpnodeselector.Register(plugins)
 }
 
@@ -147,6 +150,7 @@ func DefaultOffAdmissionPlugins() sets.String {
 		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
 		resourcequota.PluginName,            //ResourceQuota
 		signingpolicy.PluginName,            // CheckImageSigning
+		ucpauthz.PluginName,                 // UCPAuthorization
 		ucpnodeselector.PluginName,          // UCPNodeSelector
 	)
 
