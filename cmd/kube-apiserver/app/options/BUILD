@@ -47,6 +47,7 @@ go_library(
         "//plugin/pkg/admission/serviceaccount:go_default_library",
         "//plugin/pkg/admission/signingpolicy:go_default_library",
         "//plugin/pkg/admission/storageclass/setdefault:go_default_library",
+        "//plugin/pkg/admission/ucpnodeselector:go_default_library",
         "//plugin/pkg/admission/webhook:go_default_library",
         "//vendor/github.com/spf13/pflag:go_default_library",
         "//vendor/k8s.io/apiextensions-apiserver/pkg/apiserver:go_default_library",

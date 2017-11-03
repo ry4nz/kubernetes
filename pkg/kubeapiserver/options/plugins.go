@@ -51,6 +51,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/resize"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageclass/setdefault"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageobjectinuseprotection"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucpnodeselector"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/admission"
@@ -94,6 +95,7 @@ var AllOrderedPlugins = []string{
 	validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
 	resourcequota.PluginName,                // ResourceQuota
 	deny.PluginName,                         // AlwaysDeny
+	ucpnodeselector.PluginName,              // UCPNodeSelector
 }
 
 // RegisterAllAdmissionPlugins registers all admission plugins and
@@ -126,6 +128,7 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	signingpolicy.Register(plugins)
 	resize.Register(plugins)
 	storageobjectinuseprotection.Register(plugins)
+	ucpnodeselector.Register(plugins)
 }
 
 // DefaultOffAdmissionPlugins get admission plugins off by default for kube-apiserver.
@@ -141,6 +144,7 @@ func DefaultOffAdmissionPlugins() sets.String {
 		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
 		resourcequota.PluginName,            //ResourceQuota
 		signingpolicy.PluginName,            // CheckImageSigning
+		ucpnodeselector.PluginName,          // UCPNodeSelector
 	)
 
 	return sets.NewString(AllOrderedPlugins...).Difference(defaultOnPlugins)
