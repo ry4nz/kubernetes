@@ -38,6 +38,7 @@ filegroup(
         "//plugin/pkg/admission/storage/storageclass/setdefault:all-srcs",
         "//plugin/pkg/admission/storage/storageobjectinuseprotection:all-srcs",
         "//plugin/pkg/admission/signingpolicy:all-srcs",
+        "//plugin/pkg/admission/ucpauthz:all-srcs",
         "//plugin/pkg/admission/storageclass/setdefault:all-srcs",
         "//plugin/pkg/admission/ucpnodeselector:all-srcs",
         "//plugin/pkg/admission/webhook:all-srcs",

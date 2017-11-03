@@ -54,6 +54,7 @@ go_library(
         "//plugin/pkg/admission/storage/persistentvolume/resize:go_default_library",
         "//plugin/pkg/admission/storage/storageclass/setdefault:go_default_library",
         "//plugin/pkg/admission/storage/storageobjectinuseprotection:go_default_library",
+        "//plugin/pkg/admission/ucpauthz:go_default_library",
         "//plugin/pkg/admission/ucpnodeselector:go_default_library",
         "//vendor/github.com/golang/glog:go_default_library",
         "//vendor/github.com/pborman/uuid:go_default_library",
