@@ -24,10 +24,10 @@ type response struct {
 func TestAdmission(t *testing.T) {
 	namespace := "test"
 	responses := []response{
-		response{200, "signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"},
-		response{403, ""},
-		response{200, "signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"},
-		response{403, ""},
+		response{200, `{"resolvedImages":{"signed":"signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"}}`},
+		response{200, "{}"},
+		response{200, `{"resolvedImages":{"signed":"signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"}}`},
+		response{200, "{}"},
 	}
 	i := 0
 	ts := httptest.NewServer(http.HandlerFunc(
@@ -49,8 +49,8 @@ func TestAdmission(t *testing.T) {
 		},
 	}
 	handler := &signingPolicy{
-		Handler:     admission.NewHandler(admission.Create, admission.Update),
-		ucpLocation: os.Getenv("UCP_URL"),
+		Handler:       admission.NewHandler(admission.Create, admission.Update),
+		ucpWebHookURL: os.Getenv("UCP_URL"),
 		httpClient: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: nil,
@@ -74,7 +74,8 @@ func TestAdmission(t *testing.T) {
 		},
 	}
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
-	assert.EqualError(t, err, "unsigned is not signed")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "one or more images do not meet the required signing policy: [unsigned]; additional error messages: []")
 
 	pod = api.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
@@ -97,5 +98,6 @@ func TestAdmission(t *testing.T) {
 		},
 	}
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
-	assert.EqualError(t, err, "unsigned is not signed")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "one or more images do not meet the required signing policy: [unsigned]; additional error messages: []")
 }
