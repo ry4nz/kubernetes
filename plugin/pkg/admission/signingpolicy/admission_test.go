@@ -17,24 +17,23 @@ import (
 // TestAdmission verifies all create requests for pods result in every container's image pull policy
 // set to Always
 type response struct {
-	statuscode int
-	image      string
+	statuscode  int
+	rawResponse string
 }
 
 func TestAdmission(t *testing.T) {
 	namespace := "test"
 	responses := []response{
 		response{200, `{"resolvedImages":{"signed":"signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"}}`},
-		response{200, "{}"},
+		response{200, `{"errorMessages":["error fixture"]}`},
 		response{200, `{"resolvedImages":{"signed":"signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5"}}`},
-		response{200, "{}"},
+		response{200, `{"errorMessages":["error fixture"]}`},
 	}
 	i := 0
 	ts := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
-			fmt.Print(responses[1].image)
 			w.WriteHeader(responses[i].statuscode)
-			w.Write([]byte(responses[i].image))
+			w.Write([]byte(responses[i].rawResponse))
 			i++
 		}))
 	fmt.Printf("UCP mock sever URL: %s", ts.URL)
@@ -75,7 +74,7 @@ func TestAdmission(t *testing.T) {
 	}
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "one or more images do not meet the required signing policy: [unsigned]; additional error messages: []")
+	assert.Contains(t, err.Error(), "error fixture")
 
 	pod = api.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
@@ -99,5 +98,5 @@ func TestAdmission(t *testing.T) {
 	}
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "one or more images do not meet the required signing policy: [unsigned]; additional error messages: []")
+	assert.Contains(t, err.Error(), "error fixture")
 }

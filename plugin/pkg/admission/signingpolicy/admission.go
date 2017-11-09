@@ -138,10 +138,27 @@ func getPodSpecFromObject(runtimeObject runtime.Object) *api.PodSpec {
 	}
 }
 
+func getOldImageSet(oldObject runtime.Object) map[string]struct{} {
+	oldPodSpec := getPodSpecFromObject(oldObject)
+	if oldPodSpec == nil {
+		return nil
+	}
+
+	oldImageSet := map[string]struct{}{}
+	for _, container := range oldPodSpec.InitContainers {
+		oldImageSet[container.Image] = struct{}{}
+	}
+	for _, container := range oldPodSpec.Containers {
+		oldImageSet[container.Image] = struct{}{}
+	}
+
+	return oldImageSet
+}
+
 func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 	defer func() {
 		if err != nil {
-			log.Errorf("[DCT Signing Policy]: %s", err)
+			log.Errorf("[DCT Signing Policy] error: %s", err)
 		}
 	}()
 
@@ -158,6 +175,14 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 	if podSpec == nil {
 		return nil // The object does not contain a Pod Spec.
 	}
+
+	log.WithFields(log.Fields{
+		"op":            attributes.GetOperation(),
+		"kind":          attributes.GetKind(),
+		"groupResource": attributes.GetResource().GroupResource(),
+		"namespace":     attributes.GetNamespace(),
+		"name":          attributes.GetName(),
+	}).Infof("DCT Image Signing Policy Check")
 
 	// Images from private registries or repositories require the user to
 	// specify image pull secrets so that the kubelet can have access to pull
@@ -186,10 +211,23 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 		containerImageSet[container.Image] = struct{}{}
 	}
 
-	// Convert the set back into a list.
+	var oldImageSet map[string]struct{}
+	if attributes.GetOperation() == admission.Update {
+		oldImageSet = getOldImageSet(attributes.GetOldObject())
+	}
+
+	// Convert the set back into a list; filter out images from the old spec if
+	// this is an update.
 	containerImages := make([]string, 0, len(containerImageSet))
 	for containerImage := range containerImageSet {
-		containerImages = append(containerImages, containerImage)
+		if _, inOldSpec := oldImageSet[containerImage]; !inOldSpec {
+			containerImages = append(containerImages, containerImage)
+		}
+	}
+
+	if len(containerImages) == 0 {
+		// There are no images to check; the update does not modify the images.
+		return nil
 	}
 
 	response, err := a.resolveImages(containerImages, imagePullSecretsData)
@@ -200,33 +238,22 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 	log.Infof("[DCT Signing Policy] Resolved Images: %s", response.ResolvedImages)
 	log.Infof("[DCT Signing Policy] Error Messages: %s", response.ErrorMessages)
 
-	// Update the pod spec with the resolved images. If an image in not in
-	// the resolved mapping then it does not meet the signing requirements.
-	policyViolatingImageSet := map[string]struct{}{}
+	// If there were any error messages about images which violated the policy,
+	// return an error which notifies about the bad images.
+	if len(response.ErrorMessages) > 0 {
+		return admission.NewForbidden(attributes, fmt.Errorf("one or more container images do not meet the required signing policy: %s", response.ErrorMessages))
+	}
 
+	// Update the pod spec with the resolved images.
 	for i, container := range podSpec.InitContainers {
 		if resolvedImage, ok := response.ResolvedImages[container.Image]; ok {
 			podSpec.InitContainers[i].Image = resolvedImage
-		} else {
-			policyViolatingImageSet[container.Image] = struct{}{}
 		}
 	}
 	for i, container := range podSpec.Containers {
 		if resolvedImage, ok := response.ResolvedImages[container.Image]; ok {
 			podSpec.Containers[i].Image = resolvedImage
-		} else {
-			policyViolatingImageSet[container.Image] = struct{}{}
 		}
-	}
-
-	// If there were any images which violated the policy, return an error
-	// which also notifies about the bad images.
-	if len(policyViolatingImageSet) > 0 || len(response.ErrorMessages) > 0 {
-		policyViolatingImages := make([]string, 0, len(policyViolatingImageSet))
-		for image := range policyViolatingImageSet {
-			policyViolatingImages = append(policyViolatingImages, image)
-		}
-		return admission.NewForbidden(attributes, fmt.Errorf("one or more images do not meet the required signing policy: %s; additional error messages: %s", policyViolatingImages, response.ErrorMessages))
 	}
 
 	return nil
