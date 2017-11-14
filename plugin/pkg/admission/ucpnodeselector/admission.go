@@ -94,6 +94,9 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
 	if !objectHasPodSpec(attributes.GetObject()) {
 		return nil
 	}
+	if attributes.GetOperation() == admission.Update && !objectSupportsNodeSelectorUpdates(attributes.GetObject()) {
+		return nil
+	}
 	namespace := attributes.GetNamespace()
 	nodeSelector := map[string]string{}
 	nodeAffinityRequirements := []api.NodeSelectorTerm{}
@@ -200,6 +203,16 @@ func objectHasPodSpec(runtimeObject runtime.Object) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func objectSupportsNodeSelectorUpdates(runtimeObject runtime.Object) bool {
+	// Pods cannot have their node selectors updated except at creation
+	switch runtimeObject.(type) {
+	case *api.Pod:
+		return false
+	default:
+		return true
 	}
 }
 
