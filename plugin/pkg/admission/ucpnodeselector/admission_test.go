@@ -97,6 +97,23 @@ func TestAdmissionKubernetesSelector(t *testing.T) {
 	require.NoError(err)
 	require.Equal("bar", pod.Spec.NodeSelector["foo"])
 	require.NotContains(pod.Spec.NodeSelector, "com.docker.ucp.orchestrator.kubernetes")
+
+	// Update operations should not modify pods' node selectors
+	pod = api.Pod{
+		Spec: api.PodSpec{
+			NodeSelector: map[string]string{
+				"foo": "bar",
+			},
+			Containers: []api.Container{{
+				Image: "busybox",
+			}},
+		},
+	}
+	namespace = "testnamespace"
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "testuser"}))
+	require.NoError(err)
+	require.Equal("bar", pod.Spec.NodeSelector["foo"])
+	require.NotContains(pod.Spec.NodeSelector, "com.docker.ucp.orchestrator.kubernetes")
 }
 
 // TestAdmissionManagerScheduling verifies that we add node affinity
@@ -232,4 +249,27 @@ func TestAdmissionManagerSchedulingForDeployment(t *testing.T) {
 	require.Equal("com.docker.ucp.collection.system", matchExpression.Key)
 	require.Equal(api.NodeSelectorOpNotIn, matchExpression.Operator)
 	require.Equal("true", matchExpression.Values[0])
+
+	// Deployments should get updated in Update calls, unlike pods.
+	deployment = extensions.Deployment{
+		Spec: extensions.DeploymentSpec{
+			Template: api.PodTemplateSpec{
+				Spec: api.PodSpec{
+					Containers: []api.Container{{
+						Image: "busybox",
+					}},
+				},
+			},
+		},
+	}
+	namespace = "testnamespace"
+	statusCode = 200
+	output = "false"
+	err = handler.Admit(admission.NewAttributesRecord(&deployment, nil, api.Kind("Deployment").WithVersion("version"), namespace, "testpod", api.Resource("deployments").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "testuser"}))
+	require.NoError(err)
+	matchExpression = deployment.Spec.Template.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0]
+	require.Equal("com.docker.ucp.collection.system", matchExpression.Key)
+	require.Equal(api.NodeSelectorOpNotIn, matchExpression.Operator)
+	require.Equal("true", matchExpression.Values[0])
+
 }
