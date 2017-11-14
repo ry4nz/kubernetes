@@ -183,23 +183,7 @@ func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error)
 
 func objectHasPodSpec(runtimeObject runtime.Object) bool {
 	switch runtimeObject.(type) {
-	case *api.Pod:
-		return true
-	case *api.PodTemplate:
-		return true
-	case *api.ReplicationController:
-		return true
-	case *apps.StatefulSet:
-		return true
-	case *extensions.DaemonSet:
-		return true
-	case *extensions.Deployment:
-		return true
-	case *extensions.ReplicaSet:
-		return true
-	case *batch.Job:
-		return true
-	case *batch.CronJob:
+	case *api.Pod, *api.PodTemplate, *api.ReplicationController, *apps.StatefulSet, *extensions.DaemonSet, *extensions.Deployment, *extensions.ReplicaSet, *batch.Job, *batch.CronJob:
 		return true
 	default:
 		return false
@@ -207,9 +191,10 @@ func objectHasPodSpec(runtimeObject runtime.Object) bool {
 }
 
 func objectSupportsNodeSelectorUpdates(runtimeObject runtime.Object) bool {
-	// Pods cannot have their node selectors updated except at creation
+	// Pods and jobs cannot have their node selectors updated except at
+	// creation
 	switch runtimeObject.(type) {
-	case *api.Pod:
+	case *api.Pod, *batch.CronJob:
 		return false
 	default:
 		return true
