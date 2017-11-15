@@ -194,7 +194,7 @@ func objectSupportsNodeSelectorUpdates(runtimeObject runtime.Object) bool {
 	// Pods and jobs cannot have their node selectors updated except at
 	// creation
 	switch runtimeObject.(type) {
-	case *api.Pod, *batch.CronJob:
+	case *api.Pod, *batch.Job:
 		return false
 	default:
 		return true
