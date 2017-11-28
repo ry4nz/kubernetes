@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
@@ -18,6 +19,48 @@ import (
 type response struct {
 	statuscode int
 	body       string
+}
+
+func TestStackAnnotation(t *testing.T) {
+	require := require.New(t)
+
+	handler := &ucpAuthz{
+		Handler: admission.NewHandler(admission.Create, admission.Update),
+	}
+
+	// Test 1: attempt to pre-annotate a stack
+	stack := &unstructured.Unstructured{}
+	stack.SetName("somestack")
+	stack.SetNamespace("default")
+	stack.SetAnnotations(map[string]string{
+		userAnnotationKey: "otheruser",
+	})
+
+	err := handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
+	require.NoError(err)
+	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
+
+	// Test 2: A stack with no annotations is annotated as the user
+	stack = &unstructured.Unstructured{}
+	stack.SetName("somestack")
+	stack.SetNamespace("default")
+	stack.SetAnnotations(make(map[string]string))
+
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
+	require.NoError(err)
+	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
+
+	// Test 3: Stack annotations are not changed if edited by the compose fry
+	stack = &unstructured.Unstructured{}
+	stack.SetName("somestack")
+	stack.SetNamespace("default")
+	stack.SetAnnotations(map[string]string{
+		userAnnotationKey: "testuser",
+	})
+
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: composeUser}))
+	require.NoError(err)
+	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 }
 
 func TestAdmission(t *testing.T) {
