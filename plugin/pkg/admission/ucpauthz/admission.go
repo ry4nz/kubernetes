@@ -10,11 +10,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/docker/go-connections/tlsconfig"
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/kubernetes/pkg/api"
@@ -29,12 +31,14 @@ import (
 // admin.
 
 const (
-	key            = "key.pem"
-	cert           = "cert.pem"
-	rootCA         = "ca.pem"
-	isAdminPath    = "/api/authz/isadmin"
-	parametersPath = "/api/authz/parameters"
-	queryKey       = "user"
+	key               = "key.pem"
+	cert              = "cert.pem"
+	rootCA            = "ca.pem"
+	isAdminPath       = "/api/authz/isadmin"
+	parametersPath    = "/api/authz/parameters"
+	queryKey          = "user"
+	userAnnotationKey = "com.docker.compose.user"
+	composeUser       = "system:serviceaccount:kube-system:compose"
 )
 
 const (
@@ -166,6 +170,28 @@ func ParamsFromPodSpec(podSpec *api.PodSpec) *authzParameters {
 func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	user := attributes.GetUserInfo().GetName()
 	log.Debugf("the user is: %s", user)
+
+	// For stacks, annotate the object with the user that issued this request
+	// to let authorization happen via impersonation.
+	if attributes.GetKind().Kind == "Stack" {
+		stack, ok := attributes.GetObject().(*unstructured.Unstructured)
+		if !ok {
+			return fmt.Errorf("detected object of kind \"Stack\" and type %s but was expecting *unstructured.Unstructured", reflect.TypeOf(attributes.GetObject()).String())
+		}
+
+		annotations := stack.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+
+		// Overwrite any user-specified annotations, except if the stack is
+		// being modified by the compose adaptor itself.
+		if user != composeUser {
+			annotations[userAnnotationKey] = user
+		}
+		stack.SetAnnotations(annotations)
+		return nil
+	}
 
 	// Always admit requests from system components
 	if a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix) {
