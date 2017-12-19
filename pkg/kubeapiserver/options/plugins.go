@@ -49,6 +49,7 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/resize"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageclass/setdefault"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageobjectinuseprotection"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucpadminserviceaccount"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucpauthz"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucpnodeselector"
 
@@ -95,6 +96,7 @@ var AllOrderedPlugins = []string{
 	validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
 	resourcequota.PluginName,                // ResourceQuota
 	deny.PluginName,                         // AlwaysDeny
+	ucpadminserviceaccount.PluginName,       // UCPAdminServiceAccount
 	ucpauthz.PluginName,                     // UCPAuthorization
 	ucpnodeselector.PluginName,              // UCPNodeSelector
 }
@@ -147,6 +149,7 @@ func DefaultOffAdmissionPlugins() sets.String {
 		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
 		resourcequota.PluginName,            //ResourceQuota
 		signingpolicy.PluginName,            // CheckImageSigning
+		ucpadminserviceaccount.PluginName,   // UCPAdminServiceAccount
 		ucpauthz.PluginName,                 // UCPAuthorization
 		ucpnodeselector.PluginName,          // UCPNodeSelector
 	)

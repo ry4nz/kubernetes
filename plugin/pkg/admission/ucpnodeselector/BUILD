@@ -13,6 +13,7 @@ go_library(
         "//vendor/k8s.io/apimachinery/pkg/api/errors:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
         "//vendor/k8s.io/apiserver/pkg/admission:go_default_library",
+        "//vendor/k8s.io/apiserver/pkg/authentication/user:go_default_library",
     ],
 )
 
@@ -22,6 +23,7 @@ go_test(
     library = ":go_default_library",
     deps = [
         "//pkg/api:go_default_library",
+        "//pkg/apis/extensions:go_default_library",
         "//vendor/github.com/stretchr/testify/require:go_default_library",
         "//vendor/k8s.io/apiserver/pkg/admission:go_default_library",
         "//vendor/k8s.io/apiserver/pkg/authentication/user:go_default_library",
