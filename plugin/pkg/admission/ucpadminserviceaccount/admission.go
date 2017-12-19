@@ -14,12 +14,15 @@ import (
 	"github.com/docker/go-connections/tlsconfig"
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	kubeapiserveradmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
 )
 
 // The UCPAdminServiceAccount admission controller injects the
@@ -73,6 +76,23 @@ type ucpAdminServiceAccount struct {
 	*admission.Handler
 	ucpLocation string
 	httpClient  *http.Client
+
+	client internalclientset.Interface
+}
+
+var _ = kubeapiserveradmission.WantsInternalKubeClientSet(&ucpAdminServiceAccount{})
+
+// Validate ensures the client is set
+func (a *ucpAdminServiceAccount) Validate() error {
+	if a.client == nil {
+		return fmt.Errorf("missing client")
+	}
+
+	return nil
+}
+
+func (a *ucpAdminServiceAccount) SetInternalKubeClientSet(cl internalclientset.Interface) {
+	a.client = cl
 }
 
 func (a *ucpAdminServiceAccount) Admit(attributes admission.Attributes) (err error) {
@@ -95,6 +115,16 @@ func (a *ucpAdminServiceAccount) Admit(attributes admission.Attributes) (err err
 			// service account doesn't exist, it will be created by the
 			// ServiceAccount admission controller.
 			podSpec.ServiceAccountName = viewOnlyDefaultServiceAccountName
+
+			// Attempt to create the service account and fail silently
+			_, err := a.client.Core().ServiceAccounts(attributes.GetNamespace()).Create(&api.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: viewOnlyDefaultServiceAccountName,
+				},
+			})
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				return apierrors.NewInternalError(err)
+			}
 		}
 		// If the user is not an admin, do not inject the `viewonlydefault`
 		// service account.
