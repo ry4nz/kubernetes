@@ -13,21 +13,22 @@ import (
 
 	"github.com/docker/go-connections/tlsconfig"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	authUser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apis/apps"
-	"k8s.io/kubernetes/pkg/apis/batch"
-	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
 // The UCPNodeSelector admission controller adds a
-// com.docker.ucp.orchestrator.kubernetes=true node selector to all pods not
-// in the kube-system namespace. This ensures that user workloads always run
-// on UCP nodes marked for Kubernetes. It also adds a node affinity to prevent
-// pods from running on manager nodes depending on UCP's settings (as gathered
-// from the /api/authz/managerscheduling UCP endpoint).
+// com.docker.ucp.orchestrator.kubernetes:* toleration to pods in the
+// kube-system namespace and removes com.docker.ucp.orchestrator.kubernetes
+// tolerations from pods in other namespaces.  This ensures that user workloads
+// do not run on swarm-only nodes, which UCP taints with
+// com.docker.ucp.orchestrator.kubernetes:NoExecute.
+//
+// It also adds a node affinity to prevent pods from running on manager nodes
+// depending on UCP's settings (as gathered from the
+// /api/authz/managerscheduling UCP endpoint).
 
 const (
 	key      = "key.pem"
@@ -36,9 +37,9 @@ const (
 	apiPath  = "/api/authz/managerscheduling"
 	queryKey = "user"
 
-	kubeSystemNamespace   = "kube-system"
-	kubeNodeSelectorLabel = "com.docker.ucp.orchestrator.kubernetes"
-	kubeNodeSelectorValue = "true"
+	kubeSystemNamespace = "kube-system"
+
+	tolerationKey = "com.docker.ucp.orchestrator.kubernetes"
 
 	ucpSystemCollectionLabel = "com.docker.ucp.collection.system"
 	ucpCollectionLabelValue  = "true"
@@ -95,20 +96,40 @@ type ucpNodeSelector struct {
 
 // Admit handles resources that are passed through this admission controller
 func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
-	if !objectHasPodSpec(attributes.GetObject()) {
+	// Jobs don't support PodTemplateSpec updates.
+	if attributes.GetOperation() == admission.Update && attributes.GetKind().GroupKind() == api.Kind("Job") {
 		return nil
-	}
-	if attributes.GetOperation() == admission.Update && !objectSupportsNodeSelectorUpdates(attributes.GetObject()) {
-		return nil
-	}
-	namespace := attributes.GetNamespace()
-	nodeSelector := map[string]string{}
-	nodeAffinityRequirements := []api.NodeSelectorTerm{}
-	// Don't do anything for system pods
-	if namespace != kubeSystemNamespace {
-		nodeSelector[kubeNodeSelectorLabel] = kubeNodeSelectorValue
 	}
 
+	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
+	if podSpec == nil {
+		return nil
+	}
+
+	// UCP adds a tolerationKey:NoExecute taint to swarm-only nodes to keep user pods off.
+	// First, remove any toleration with that key.
+	var tolerations []api.Toleration
+	for _, t := range podSpec.Tolerations {
+		if t.Key != tolerationKey {
+			tolerations = append(tolerations, t)
+		}
+	}
+	// Second, add a tolerationKey:* toleration to kube-system pods so they can run on swarm-only nodes.
+	if attributes.GetNamespace() == kubeSystemNamespace {
+		tolerations = append(tolerations, api.Toleration{
+			Key:      tolerationKey,
+			Operator: api.TolerationOpExists,
+			// Zero value for Effect matches all taint effects.
+		})
+	}
+	podSpec.Tolerations = tolerations
+
+	// Pods don't support node affinity updates.
+	if attributes.GetOperation() == admission.Update && attributes.GetKind().GroupKind() == api.Kind("Pod") {
+		return nil
+	}
+
+	nodeAffinityRequirements := []api.NodeSelectorTerm{}
 	user := attributes.GetUserInfo().GetName()
 	hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
 	isSystemUser := false
@@ -134,7 +155,7 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
 			})
 		}
 	}
-	updatePodSpecForObject(attributes.GetObject(), nodeSelector, nodeAffinityRequirements)
+	addNodeAffinityRequirementsToPodSpec(podSpec, nodeAffinityRequirements)
 
 	return nil
 }
@@ -185,60 +206,7 @@ func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error)
 	}
 }
 
-func objectHasPodSpec(runtimeObject runtime.Object) bool {
-	switch runtimeObject.(type) {
-	case *api.Pod, *api.PodTemplate, *api.ReplicationController, *apps.StatefulSet, *extensions.DaemonSet, *extensions.Deployment, *extensions.ReplicaSet, *batch.Job, *batch.CronJob:
-		return true
-	default:
-		return false
-	}
-}
-
-func objectSupportsNodeSelectorUpdates(runtimeObject runtime.Object) bool {
-	// Pods and jobs cannot have their node selectors updated except at
-	// creation
-	switch runtimeObject.(type) {
-	case *api.Pod, *batch.Job:
-		return false
-	default:
-		return true
-	}
-}
-
-func updatePodSpecForObject(runtimeObject runtime.Object, nodeSelector map[string]string, nodeAffinityRequirements []api.NodeSelectorTerm) {
-	switch object := runtimeObject.(type) {
-	case *api.Pod:
-		mergePodSpec(&object.Spec, nodeSelector, nodeAffinityRequirements)
-	case *api.PodTemplate:
-		mergePodSpec(&object.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *api.ReplicationController:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *apps.StatefulSet:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *extensions.DaemonSet:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *extensions.Deployment:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *extensions.ReplicaSet:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *batch.Job:
-		mergePodSpec(&object.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	case *batch.CronJob:
-		mergePodSpec(&object.Spec.JobTemplate.Spec.Template.Spec, nodeSelector, nodeAffinityRequirements)
-	default:
-		// Ignore all calls for objects that do not contain a Pod Spec.
-	}
-}
-
-func mergePodSpec(podSpec *api.PodSpec, nodeSelector map[string]string, nodeAffinityRequirements []api.NodeSelectorTerm) {
-	if len(nodeSelector) > 0 {
-		if podSpec.NodeSelector == nil {
-			podSpec.NodeSelector = map[string]string{}
-		}
-		for k, v := range nodeSelector {
-			podSpec.NodeSelector[k] = v
-		}
-	}
+func addNodeAffinityRequirementsToPodSpec(podSpec *api.PodSpec, nodeAffinityRequirements []api.NodeSelectorTerm) {
 	if len(nodeAffinityRequirements) > 0 {
 		if podSpec.Affinity == nil {
 			podSpec.Affinity = &api.Affinity{}
