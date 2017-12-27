@@ -7,21 +7,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/apis/apps"
+	"k8s.io/kubernetes/pkg/apis/batch"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
-type response struct {
-	statuscode int
-	image      string
-}
-
-// TestAdmissionKubernetesSelector verifies all create requests for pods get a
-// kubernetes=true node selector
-func TestAdmissionKubernetesSelector(t *testing.T) {
+// TestAdmissionKubernetesTolerations verifies all create and update requests
+// make appropriate changes to PodSpec tolerations.
+func TestAdmissionKubernetesTolerations(t *testing.T) {
 	require := require.New(t)
+
 	ts := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Query().Get("user") == "" {
@@ -44,76 +44,62 @@ func TestAdmissionKubernetesSelector(t *testing.T) {
 		},
 	}
 
-	// Regular pods should get the kubernetes=true node selector added.
-	pod := api.Pod{
-		Spec: api.PodSpec{
-			NodeSelector: map[string]string{
-				"foo": "bar",
-			},
-			Containers: []api.Container{{
-				Image: "busybox",
-			}},
-		},
+	systemToleration := api.Toleration{
+		Key:      "com.docker.ucp.orchestrator.kubernetes",
+		Operator: api.TolerationOpExists,
 	}
-	namespace := "testnamespace"
-	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
-	require.NoError(err)
-	require.Equal("bar", pod.Spec.NodeSelector["foo"])
-	require.Equal("true", pod.Spec.NodeSelector["com.docker.ucp.orchestrator.kubernetes"])
+	sameKeyAsSystemToleration := api.Toleration{
+		Key: "com.docker.ucp.orchestrator.kubernetes",
+	}
+	userToleration := api.Toleration{
+		Key: "foo",
+	}
 
-	// If a pod already has a kubernetes= node selector, it should get
-	// overridden.
-	pod = api.Pod{
-		Spec: api.PodSpec{
-			NodeSelector: map[string]string{
-				"foo": "bar",
-				"com.docker.ucp.orchestrator.kubernetes": "baz",
-			},
-			Containers: []api.Container{{
-				Image: "busybox",
-			}},
-		},
+	initialTolerations := []api.Toleration{systemToleration, sameKeyAsSystemToleration, userToleration}
+	expectedTolerations := map[string][]api.Toleration{
+		"kube-system":     {userToleration, systemToleration},
+		"other-namespace": {userToleration},
 	}
-	namespace = "testnamespace"
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
-	require.NoError(err)
-	require.Equal("bar", pod.Spec.NodeSelector["foo"])
-	require.Equal("true", pod.Spec.NodeSelector["com.docker.ucp.orchestrator.kubernetes"])
 
-	// Pods in the kube-system namespace should not have their node
-	// selectors modified.
-	pod = api.Pod{
-		Spec: api.PodSpec{
-			NodeSelector: map[string]string{
-				"foo": "bar",
-			},
-			Containers: []api.Container{{
-				Image: "busybox",
-			}},
-		},
-	}
-	namespace = "kube-system"
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
-	require.NoError(err)
-	require.Equal("bar", pod.Spec.NodeSelector["foo"])
-	require.NotContains(pod.Spec.NodeSelector, "com.docker.ucp.orchestrator.kubernetes")
+	podSpec := api.PodSpec{Tolerations: initialTolerations}
+	podTemplateSpec := api.PodTemplateSpec{Spec: podSpec}
+	jobSpec := batch.JobSpec{Template: podTemplateSpec}
 
-	// Update operations should not modify pods' node selectors
-	pod = api.Pod{
-		Spec: api.PodSpec{
-			NodeSelector: map[string]string{
-				"foo": "bar",
-			},
-			Containers: []api.Container{{
-				Image: "busybox",
-			}},
-		},
+	cases := []struct {
+		object runtime.Object
+		kind   string
+	}{
+		{&api.Pod{Spec: podSpec}, "Pod"},
+		{&api.PodTemplate{Template: podTemplateSpec}, "PodTemplate"},
+		{&api.ReplicationController{Spec: api.ReplicationControllerSpec{Template: &podTemplateSpec}}, "ReplicationController"},
+		{&apps.StatefulSet{Spec: apps.StatefulSetSpec{Template: podTemplateSpec}}, "StatefulSet"},
+		{&batch.CronJob{Spec: batch.CronJobSpec{JobTemplate: batch.JobTemplateSpec{Spec: jobSpec}}}, "CronJob"},
+		{&batch.Job{Spec: jobSpec}, "Job"},
+		{&extensions.DaemonSet{Spec: extensions.DaemonSetSpec{Template: podTemplateSpec}}, "DaemonSet"},
+		{&extensions.Deployment{Spec: extensions.DeploymentSpec{Template: podTemplateSpec}}, "Deployment"},
+		{&extensions.ReplicaSet{Spec: extensions.ReplicaSetSpec{Template: podTemplateSpec}}, "ReplicaSet"},
 	}
-	namespace = "testnamespace"
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "testuser"}))
-	require.NoError(err)
-	require.Equal("bar", pod.Spec.NodeSelector["foo"])
-	require.NotContains(pod.Spec.NodeSelector, "com.docker.ucp.orchestrator.kubernetes")
+
+	for _, namespace := range []string{"kube-system", "other-namespace"} {
+		for _, operation := range []admission.Operation{admission.Create, admission.Update} {
+			for _, c := range cases {
+				o := c.object.DeepCopyObject()
+				kind := api.Kind(c.kind).WithVersion("version")
+				resource := api.Resource("resource").WithVersion("version")
+				user := &user.DefaultInfo{Name: "testuser"}
+				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, namespace, "name", resource, "", operation, user))
+				require.NoError(err, "Object type: %T\n", o)
+
+				expected := expectedTolerations[namespace]
+				if operation == admission.Update && kind.GroupKind() == api.Kind("Job") {
+					expected = initialTolerations
+				}
+				actual := ucputil.GetPodSpecFromObject(o).Tolerations
+				require.Subset(expected, actual, "Namespace %s, operation %s, kind %s", namespace, operation, c.kind)
+				require.Subset(actual, expected, "Namespace %s, operation %s, kind %s", namespace, operation, c.kind)
+			}
+		}
+	}
 }
 
 // TestAdmissionManagerScheduling verifies that we add node affinity
