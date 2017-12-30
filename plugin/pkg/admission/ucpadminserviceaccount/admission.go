@@ -15,14 +15,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apis/apps"
-	"k8s.io/kubernetes/pkg/apis/batch"
-	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	kubeapiserveradmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
 // The UCPAdminServiceAccount admission controller injects the
@@ -99,7 +96,7 @@ func (a *ucpAdminServiceAccount) Admit(attributes admission.Attributes) (err err
 	user := attributes.GetUserInfo().GetName()
 	log.Debugf("the user is: %s", user)
 
-	podSpec := getPodSpecFromObject(attributes.GetObject())
+	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
 	if podSpec == nil {
 		// The resource is not a known object type which contains a PodSpec
 		return nil
@@ -166,33 +163,6 @@ func (a *ucpAdminServiceAccount) isAdmin(username string) (bool, error) {
 		return false, nil
 	default:
 		return false, fmt.Errorf("unknown response \"%s\" while verifying if user %s is an admin", msgStr, username)
-	}
-}
-
-// TODO(alexmavr): DRY across other admission controllers
-func getPodSpecFromObject(runtimeObject runtime.Object) *api.PodSpec {
-	switch object := runtimeObject.(type) {
-	case *api.Pod:
-		return &object.Spec
-	case *api.PodTemplate:
-		return &object.Template.Spec
-	case *api.ReplicationController:
-		return &object.Spec.Template.Spec
-	case *apps.StatefulSet:
-		return &object.Spec.Template.Spec
-	case *extensions.DaemonSet:
-		return &object.Spec.Template.Spec
-	case *extensions.Deployment:
-		return &object.Spec.Template.Spec
-	case *extensions.ReplicaSet:
-		return &object.Spec.Template.Spec
-	case *batch.Job:
-		return &object.Spec.Template.Spec
-	case *batch.CronJob:
-		return &object.Spec.JobTemplate.Spec.Template.Spec
-	default:
-		// Ignore all calls for objects that do not contain a Pod Spec.
-		return nil
 	}
 }
 
