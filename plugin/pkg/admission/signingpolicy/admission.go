@@ -19,12 +19,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
-	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apis/apps"
-	"k8s.io/kubernetes/pkg/apis/batch"
-	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	kubeapiserveradmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
 const (
@@ -116,34 +113,8 @@ func (a *signingPolicy) Validate() error {
 	return nil
 }
 
-func getPodSpecFromObject(runtimeObject runtime.Object) *api.PodSpec {
-	switch object := runtimeObject.(type) {
-	case *api.Pod:
-		return &object.Spec
-	case *api.PodTemplate:
-		return &object.Template.Spec
-	case *api.ReplicationController:
-		return &object.Spec.Template.Spec
-	case *apps.StatefulSet:
-		return &object.Spec.Template.Spec
-	case *extensions.DaemonSet:
-		return &object.Spec.Template.Spec
-	case *extensions.Deployment:
-		return &object.Spec.Template.Spec
-	case *extensions.ReplicaSet:
-		return &object.Spec.Template.Spec
-	case *batch.Job:
-		return &object.Spec.Template.Spec
-	case *batch.CronJob:
-		return &object.Spec.JobTemplate.Spec.Template.Spec
-	default:
-		// Ignore all calls for objects that do not contain a Pod Spec.
-		return nil
-	}
-}
-
 func getOldImageSet(oldObject runtime.Object) map[string]struct{} {
-	oldPodSpec := getPodSpecFromObject(oldObject)
+	oldPodSpec := ucputil.GetPodSpecFromObject(oldObject)
 	if oldPodSpec == nil {
 		return nil
 	}
@@ -175,7 +146,7 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 
-	podSpec := getPodSpecFromObject(attributes.GetObject())
+	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
 	if podSpec == nil {
 		return nil // The object does not contain a Pod Spec.
 	}
