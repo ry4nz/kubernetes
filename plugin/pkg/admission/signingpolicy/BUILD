@@ -5,12 +5,9 @@ go_library(
     srcs = ["admission.go"],
     visibility = ["//visibility:public"],
     deps = [
-        "//pkg/api:go_default_library",
-        "//pkg/apis/apps:go_default_library",
-        "//pkg/apis/batch:go_default_library",
-        "//pkg/apis/extensions:go_default_library",
         "//pkg/client/clientset_generated/internalclientset:go_default_library",
         "//pkg/kubeapiserver/admission:go_default_library",
+        "//plugin/pkg/admission/ucputil:go_default_library",
         "//vendor/github.com/docker/go-connections/tlsconfig:go_default_library",
         "//vendor/github.com/sirupsen/logrus:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/errors:go_default_library",

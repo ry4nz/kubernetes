@@ -18,12 +18,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/apis/apps"
-	"k8s.io/kubernetes/pkg/apis/batch"
-	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
 // The UCPAuthorization admission controller rejects requests based on the
@@ -214,7 +211,7 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 
-	podSpec := getPodSpecFromObject(attributes.GetObject())
+	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
 	if podSpec == nil {
 		// The resource is not a known object type which contains a PodSpec
 		return nil
@@ -395,33 +392,6 @@ func (a *ucpAuthz) hasVolumeAccess(username string, podSpec *api.PodSpec) (bool,
 		}
 	}
 	return true, "", nil
-}
-
-// TODO(alexmavr): DRY across other admission controllers
-func getPodSpecFromObject(runtimeObject runtime.Object) *api.PodSpec {
-	switch object := runtimeObject.(type) {
-	case *api.Pod:
-		return &object.Spec
-	case *api.PodTemplate:
-		return &object.Template.Spec
-	case *api.ReplicationController:
-		return &object.Spec.Template.Spec
-	case *apps.StatefulSet:
-		return &object.Spec.Template.Spec
-	case *extensions.DaemonSet:
-		return &object.Spec.Template.Spec
-	case *extensions.Deployment:
-		return &object.Spec.Template.Spec
-	case *extensions.ReplicaSet:
-		return &object.Spec.Template.Spec
-	case *batch.Job:
-		return &object.Spec.Template.Spec
-	case *batch.CronJob:
-		return &object.Spec.JobTemplate.Spec.Template.Spec
-	default:
-		// Ignore all calls for objects that do not contain a Pod Spec.
-		return nil
-	}
 }
 
 // NewUCPAuthz returns a signing policy handler
