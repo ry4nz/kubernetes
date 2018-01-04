@@ -140,7 +140,7 @@ func TestAdmission(t *testing.T) {
 	// Test 2: user is not admin, service account is used
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "notadmin"}))
 	require.Error(err)
-	require.Contains(err.Error(), "only docker EE admin users are permitted to use service accounts")
+	require.Contains(err.Error(), "only Docker EE admin users are permitted to use service accounts")
 
 	// Test 3: user is an admin, service account is used, ucp controller webhook fails
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
@@ -155,7 +155,7 @@ func TestAdmission(t *testing.T) {
 	// account is used.
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}))
 	require.Error(err)
-	require.Contains(err.Error(), "only docker EE admin users are permitted to use service accounts")
+	require.Contains(err.Error(), "only Docker EE admin users are permitted to use service accounts")
 
 	// Test 6: user is not an admin, no service account is used
 	pod = api.Pod{

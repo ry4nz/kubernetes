@@ -12,6 +12,7 @@ import (
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/apis/extensions"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 )
 
 type response struct {
@@ -19,7 +20,7 @@ type response struct {
 	body       string
 }
 
-// TestAdmission verifies that only admins have the `viewonlydefault` service
+// TestAdmission verifies that only admins have the `default` service
 // account injected in their podspecs
 func TestAdmission(t *testing.T) {
 	require := require.New(t)
@@ -66,17 +67,22 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
+
+	client := fake.NewSimpleClientset()
+	handler.SetInternalKubeClientSet(client)
+
 	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
-	require.Equal(viewOnlyDefaultServiceAccountName, pod.Spec.ServiceAccountName)
+	require.Equal(defaultServiceAccountName, pod.Spec.ServiceAccountName)
 
-	// Test 2: user is not admin, no service account is used
+	// Test 2: user is not admin, nonadmindefault account is used
 	pod.Spec.ServiceAccountName = ""
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "notadmin"}))
 	require.NoError(err)
-	require.Equal("", pod.Spec.ServiceAccountName)
+	require.Equal(nonAdminDefaultServiceAccountName, pod.Spec.ServiceAccountName)
 
 	// Test 3: no service account is used, ucp controller webhook fails
+	pod.Spec.ServiceAccountName = ""
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
 	require.Error(err)
 	require.Contains(err.Error(), "unable to lookup user adminuser: some unexpected error")
@@ -94,13 +100,13 @@ func TestAdmission(t *testing.T) {
 	}
 	err = handler.Admit(admission.NewAttributesRecord(&deployment, nil, api.Kind("Deployment").WithVersion("version"), deployment.Namespace, deployment.Name, api.Resource("deployments").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
-	require.Equal(viewOnlyDefaultServiceAccountName, deployment.Spec.Template.Spec.ServiceAccountName)
+	require.Equal(defaultServiceAccountName, deployment.Spec.Template.Spec.ServiceAccountName)
 
 	// Test 5: update a deployment with no service account as a non-admin user
 	deployment.Spec.Template.Spec.ServiceAccountName = ""
 	err = handler.Admit(admission.NewAttributesRecord(&deployment, nil, api.Kind("Deployment").WithVersion("version"), deployment.Namespace, deployment.Name, api.Resource("deployments").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "notadmin"}))
 	require.NoError(err)
-	require.Equal("", deployment.Spec.Template.Spec.ServiceAccountName)
+	require.Equal(nonAdminDefaultServiceAccountName, deployment.Spec.Template.Spec.ServiceAccountName)
 
 	// Test 6: update a deployment with a service account as an admin user
 	deployment.Spec.Template.Spec.ServiceAccountName = "foobar"
