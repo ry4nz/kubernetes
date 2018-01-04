@@ -218,16 +218,17 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	}
 
 	// Only UCP admins are allowed to use service accounts. However, the
-	// `default` service account of each namespace is permitted because it is
-	// automatically added to pods during the ServiceAccount admission
-	// controller and its actions will be blocked during authorization.
-	if podSpec.ServiceAccountName != "" && podSpec.ServiceAccountName != "default" {
+	// `nondefault` service account of each namespace is permitted because
+	// it is automatically added to pods by the UCPAdminServiceAccount
+	// admission controller and its actions will be blocked during
+	// authorization.
+	if podSpec.ServiceAccountName != "" && podSpec.ServiceAccountName != "nonadmindefault" {
 		isAdmin, err := a.isAdmin(user)
 		if err != nil {
 			return apierrors.NewInternalError(err)
 		}
 		if !isAdmin {
-			return admission.NewForbidden(attributes, fmt.Errorf("only docker EE admin users are permitted to use service accounts other than `default`"))
+			return admission.NewForbidden(attributes, fmt.Errorf("only Docker EE admin users are permitted to use service accounts other than `nonadmindefault`"))
 		}
 	}
 

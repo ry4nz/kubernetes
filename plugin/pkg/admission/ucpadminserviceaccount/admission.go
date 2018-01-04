@@ -23,7 +23,9 @@ import (
 )
 
 // The UCPAdminServiceAccount admission controller injects the
-// `viewonlydefault` service account to all PodSpecs created by an admin-level user.
+// `default` service account to all PodSpecs created by an admin-level user
+// and the `nonadmindefault` service account to all PodSpecs created by a
+// non-admin user.
 // It is intended to be chained before the ServiceAccount admission controller
 
 const (
@@ -31,7 +33,8 @@ const (
 	cert                              = "cert.pem"
 	rootCA                            = "ca.pem"
 	isAdminPath                       = "/api/authz/isadmin"
-	viewOnlyDefaultServiceAccountName = "viewonlydefault"
+	defaultServiceAccountName         = "default"
+	nonAdminDefaultServiceAccountName = "nonadmindefault"
 )
 
 const (
@@ -108,23 +111,19 @@ func (a *ucpAdminServiceAccount) Admit(attributes admission.Attributes) (err err
 			return apierrors.NewInternalError(err)
 		}
 		if isAdmin {
-			// Add the admin's default service account to the podspec. If the
-			// service account doesn't exist, it will be created by the
-			// ServiceAccount admission controller.
-			podSpec.ServiceAccountName = viewOnlyDefaultServiceAccountName
-
+			podSpec.ServiceAccountName = defaultServiceAccountName
+		} else {
+			podSpec.ServiceAccountName = nonAdminDefaultServiceAccountName
 			// Attempt to create the service account and fail silently
 			_, err := a.client.Core().ServiceAccounts(attributes.GetNamespace()).Create(&api.ServiceAccount{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: viewOnlyDefaultServiceAccountName,
+					Name: nonAdminDefaultServiceAccountName,
 				},
 			})
 			if err != nil && !apierrors.IsAlreadyExists(err) {
 				return apierrors.NewInternalError(err)
 			}
 		}
-		// If the user is not an admin, do not inject the `viewonlydefault`
-		// service account.
 	}
 	return nil
 }
