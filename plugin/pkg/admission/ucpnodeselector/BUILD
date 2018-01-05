@@ -6,6 +6,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/api:go_default_library",
+        "//pkg/apis/batch:go_default_library",
         "//plugin/pkg/admission/ucputil:go_default_library",
         "//vendor/github.com/docker/go-connections/tlsconfig:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/errors:go_default_library",
@@ -26,6 +27,7 @@ go_test(
         "//plugin/pkg/admission/ucputil:go_default_library",
         "//vendor/github.com/stretchr/testify/require:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
         "//vendor/k8s.io/apiserver/pkg/admission:go_default_library",
         "//vendor/k8s.io/apiserver/pkg/authentication/user:go_default_library",
     ],

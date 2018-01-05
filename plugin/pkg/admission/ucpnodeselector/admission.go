@@ -16,6 +16,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	authUser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/apis/batch"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -96,12 +97,14 @@ type ucpNodeSelector struct {
 
 // Admit handles resources that are passed through this admission controller
 func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
+	object := attributes.GetObject()
+
 	// Jobs don't support PodTemplateSpec updates.
-	if attributes.GetOperation() == admission.Update && attributes.GetKind().GroupKind() == api.Kind("Job") {
+	if _, ok := object.(*batch.Job); ok && attributes.GetOperation() == admission.Update {
 		return nil
 	}
 
-	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
+	podSpec := ucputil.GetPodSpecFromObject(object)
 	if podSpec == nil {
 		return nil
 	}
@@ -125,7 +128,7 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
 	podSpec.Tolerations = tolerations
 
 	// Pods don't support node affinity updates.
-	if attributes.GetOperation() == admission.Update && attributes.GetKind().GroupKind() == api.Kind("Pod") {
+	if _, ok := object.(*api.Pod); ok && attributes.GetOperation() == admission.Update {
 		return nil
 	}
 

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/api"
@@ -65,38 +66,35 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 	podTemplateSpec := api.PodTemplateSpec{Spec: podSpec}
 	jobSpec := batch.JobSpec{Template: podTemplateSpec}
 
-	cases := []struct {
-		object runtime.Object
-		kind   string
-	}{
-		{&api.Pod{Spec: podSpec}, "Pod"},
-		{&api.PodTemplate{Template: podTemplateSpec}, "PodTemplate"},
-		{&api.ReplicationController{Spec: api.ReplicationControllerSpec{Template: &podTemplateSpec}}, "ReplicationController"},
-		{&apps.StatefulSet{Spec: apps.StatefulSetSpec{Template: podTemplateSpec}}, "StatefulSet"},
-		{&batch.CronJob{Spec: batch.CronJobSpec{JobTemplate: batch.JobTemplateSpec{Spec: jobSpec}}}, "CronJob"},
-		{&batch.Job{Spec: jobSpec}, "Job"},
-		{&extensions.DaemonSet{Spec: extensions.DaemonSetSpec{Template: podTemplateSpec}}, "DaemonSet"},
-		{&extensions.Deployment{Spec: extensions.DeploymentSpec{Template: podTemplateSpec}}, "Deployment"},
-		{&extensions.ReplicaSet{Spec: extensions.ReplicaSetSpec{Template: podTemplateSpec}}, "ReplicaSet"},
+	objects := []runtime.Object{
+		&api.Pod{Spec: podSpec},
+		&api.PodTemplate{Template: podTemplateSpec},
+		&api.ReplicationController{Spec: api.ReplicationControllerSpec{Template: &podTemplateSpec}},
+		&apps.StatefulSet{Spec: apps.StatefulSetSpec{Template: podTemplateSpec}},
+		&batch.CronJob{Spec: batch.CronJobSpec{JobTemplate: batch.JobTemplateSpec{Spec: jobSpec}}},
+		&batch.Job{Spec: jobSpec},
+		&extensions.DaemonSet{Spec: extensions.DaemonSetSpec{Template: podTemplateSpec}},
+		&extensions.Deployment{Spec: extensions.DeploymentSpec{Template: podTemplateSpec}},
+		&extensions.ReplicaSet{Spec: extensions.ReplicaSetSpec{Template: podTemplateSpec}},
 	}
 
 	for _, namespace := range []string{"kube-system", "other-namespace"} {
 		for _, operation := range []admission.Operation{admission.Create, admission.Update} {
-			for _, c := range cases {
-				o := c.object.DeepCopyObject()
-				kind := api.Kind(c.kind).WithVersion("version")
-				resource := api.Resource("resource").WithVersion("version")
+			for _, object := range objects {
+				o := object.DeepCopyObject()
+				kind := schema.GroupVersionKind{}
+				resource := schema.GroupVersionResource{}
 				user := &user.DefaultInfo{Name: "testuser"}
 				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, namespace, "name", resource, "", operation, user))
 				require.NoError(err, "Object type: %T\n", o)
 
 				expected := expectedTolerations[namespace]
-				if operation == admission.Update && kind.GroupKind() == api.Kind("Job") {
+				if _, ok := o.(*batch.Job); ok && operation == admission.Update {
 					expected = initialTolerations
 				}
 				actual := ucputil.GetPodSpecFromObject(o).Tolerations
-				require.Subset(expected, actual, "Namespace %s, operation %s, kind %s", namespace, operation, c.kind)
-				require.Subset(actual, expected, "Namespace %s, operation %s, kind %s", namespace, operation, c.kind)
+				require.Subset(expected, actual, "Namespace %s, operation %s, object %T", namespace, operation, object)
+				require.Subset(actual, expected, "Namespace %s, operation %s, object %T", namespace, operation, object)
 			}
 		}
 	}
