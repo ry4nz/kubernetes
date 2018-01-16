@@ -47,7 +47,6 @@ go_library(
         "//plugin/pkg/admission/serviceaccount:go_default_library",
         "//plugin/pkg/admission/signingpolicy:go_default_library",
         "//plugin/pkg/admission/storageclass/setdefault:go_default_library",
-        "//plugin/pkg/admission/ucpadminserviceaccount:go_default_library",
         "//plugin/pkg/admission/ucpauthz:go_default_library",
         "//plugin/pkg/admission/ucpnodeselector:go_default_library",
         "//plugin/pkg/admission/webhook:go_default_library",

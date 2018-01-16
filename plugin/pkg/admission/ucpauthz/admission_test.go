@@ -111,7 +111,6 @@ func TestAdmission(t *testing.T) {
 			}
 		}))
 
-	// Test1: user is admin, service account is used
 	pod := api.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
 		Spec: api.PodSpec{
@@ -134,28 +133,22 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
+	// Test1: user is admin, service account is used
 	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Test 2: user is not admin, service account is used
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "notadmin"}))
-	require.Error(err)
-	require.Contains(err.Error(), "only Docker EE admin users are permitted to use service accounts")
+	require.NoError(err)
 
-	// Test 3: user is an admin, service account is used, ucp controller webhook fails
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
-	require.Error(err)
-	require.Contains(err.Error(), "unable to lookup user adminuser: some unexpected error")
-
-	// Test 4: user is a system component, service account is used
+	// Test 3: user is a system component, service account is used
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "systemprefix:controllermanager"}))
 	require.NoError(err)
 
-	// Test 5: user is a system component with the wrong prefix, service
+	// Test 4: user is a system component with the wrong prefix, service
 	// account is used.
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}))
-	require.Error(err)
-	require.Contains(err.Error(), "only Docker EE admin users are permitted to use service accounts")
+	require.NoError(err)
 
 	// Test 6: user is not an admin, no service account is used
 	pod = api.Pod{
@@ -474,4 +467,50 @@ func TestAdmissionWithFlexVolumes(t *testing.T) {
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
 	require.Error(err)
 	require.Contains(err.Error(), "volume testvol1 was not in the volume access API response")
+}
+
+func TestAdmissionServiceAccountDeletion(t *testing.T) {
+	require := require.New(t)
+	responses := []response{
+		{204, ``},
+		{500, `some error`},
+		{500, `some other error`},
+	}
+	i := 0
+	ts := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, req *http.Request) {
+			w.WriteHeader(responses[i].statuscode)
+			w.Write([]byte(responses[i].body))
+			i++
+		}))
+
+	handler := &ucpAuthz{
+		Handler:      admission.NewHandler(admission.Create, admission.Update),
+		ucpLocation:  ts.URL,
+		systemPrefix: "systemprefix:",
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: nil,
+				// The default is 2 which is too small. We may need to
+				// adjust this value as we get results from load/stress
+				// tests.
+				MaxIdleConnsPerHost: 5,
+			},
+		},
+	}
+
+	sa := api.ServiceAccount{}
+	// Delete a service account and get a 204 from the service agent deletion.
+	err := handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"}))
+	require.NoError(err)
+
+	// Delete a service account and get a 500 from the service agent deletion.
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"}))
+	require.Error(err)
+	require.Equal(err.Error(), "failed to delete agent: server responded with status 500: some error")
+
+	// Update a service account and don't expect to hit the service agent
+	// deletion backend.
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "adminuser"}))
+	require.NoError(err)
 }
