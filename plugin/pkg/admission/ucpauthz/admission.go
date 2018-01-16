@@ -35,6 +35,7 @@ const (
 	isAdminPath       = "/api/authz/isadmin"
 	parametersPath    = "/api/authz/parameters"
 	volumeAccessPath  = "/api/authz/volumeaccess"
+	agentPathTemplate = "/api/agent/%s"
 	queryKey          = "user"
 	userAnnotationKey = "com.docker.compose.user"
 	composeUser       = "system:serviceaccount:kube-system:compose"
@@ -206,6 +207,13 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 
+	// If a service account is being deleted, also delete the corresponding enzi agent.
+	if attributes.GetKind().Kind == "ServiceAccount" && attributes.GetOperation() == admission.Delete {
+		name := attributes.GetName()
+		namespace := attributes.GetNamespace()
+		return a.deleteAgent(namespace, name)
+	}
+
 	// Always admit requests from system components
 	if a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix) {
 		return nil
@@ -215,21 +223,6 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	if podSpec == nil {
 		// The resource is not a known object type which contains a PodSpec
 		return nil
-	}
-
-	// Only UCP admins are allowed to use service accounts. However, the
-	// `nondefault` service account of each namespace is permitted because
-	// it is automatically added to pods by the UCPAdminServiceAccount
-	// admission controller and its actions will be blocked during
-	// authorization.
-	if podSpec.ServiceAccountName != "" && podSpec.ServiceAccountName != "nonadmindefault" {
-		isAdmin, err := a.isAdmin(user)
-		if err != nil {
-			return apierrors.NewInternalError(err)
-		}
-		if !isAdmin {
-			return admission.NewForbidden(attributes, fmt.Errorf("only Docker EE admin users are permitted to use service accounts other than `nonadmindefault`"))
-		}
 	}
 
 	// Inspect the podSpec for low-level request parameters
@@ -252,6 +245,37 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	}
 	if !hasVolumeAccess {
 		return admission.NewForbidden(attributes, fmt.Errorf(msg))
+	}
+
+	return nil
+}
+
+// deleteAgent removes an enzi agent when the corresponding kubernetes service
+// account is being deleted.
+func (a *ucpAuthz) deleteAgent(namespace, name string) error {
+	u, err := url.Parse(a.ucpLocation)
+	if err != nil {
+		return fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
+	}
+	serviceAccountID := fmt.Sprintf("serviceaccount:%s:%s", namespace, name)
+	u.Path = fmt.Sprintf(agentPathTemplate, serviceAccountID)
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("unable to create delete agent request against %s: %s", u.String(), err)
+	}
+	resp, err := a.httpClient.Do(req)
+	defer resp.Body.Close()
+	if err != nil {
+		return fmt.Errorf("request at %s failed: %s", u.String(), err)
+	}
+
+	if resp.StatusCode != http.StatusNoContent {
+		b, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to delete agent: server responded with status %d", resp.StatusCode)
+		}
+		return fmt.Errorf("failed to delete agent: server responded with status %d: %s", resp.StatusCode, string(b))
 	}
 
 	return nil
@@ -299,7 +323,6 @@ func (a *ucpAuthz) userHasPermissions(username string, params *authzParameters) 
 	default:
 		return false, fmt.Errorf("unknown response \"%s\" while requesting parameter permissions for user %s", msgStr, username)
 	}
-
 }
 
 func (a *ucpAuthz) isAdmin(username string) (bool, error) {
