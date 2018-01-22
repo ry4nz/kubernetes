@@ -39,6 +39,11 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	// NOTE(dperny) Kubernetes actually vendors github.com/docker/go-connections
+	// which means we can use it here to get a secure list of cipher suites.
+	// This is not in kubernetes mainline, only in this fork.
+	"github.com/docker/go-connections/tlsconfig"
+
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -807,8 +812,15 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 
 	tlsOptions := &server.TLSOptions{
 		Config: &tls.Config{
-			MinVersion:   minTLSVersion,
-			CipherSuites: tlsCipherSuites,
+			// Can't use SSLv3 because of POODLE and BEAST
+			// Can't use TLSv1.0 because of POODLE and BEAST using CBC cipher
+			// Can't use TLSv1.1 because of RC4 cipher usage
+			MinVersion: tls.VersionTLS12,
+			// NOTE(dperny): Use a restricted subset of acceptable TLS ciphers
+			// from docker's go-connections package for compliance reasons.
+			// This change is not in Kubernetes mainline, it is only in this
+			// fork.
+			CipherSuites: tlsconfig.DefaultServerAcceptedCiphers,
 		},
 		CertFile: kc.TLSCertFile,
 		KeyFile:  kc.TLSPrivateKeyFile,
