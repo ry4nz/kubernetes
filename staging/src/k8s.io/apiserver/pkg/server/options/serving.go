@@ -26,6 +26,11 @@ import (
 	"github.com/golang/glog"
 	"github.com/spf13/pflag"
 
+	// NOTE(dperny): this change is not in the kubernetes mainline; it is only
+	// in this fork. Import tlsconfig so we can use its default cipher suites
+	// in the kubernetes api server.
+	"github.com/docker/go-connections/tlsconfig"
+
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apiserver/pkg/server"
 	utilflag "k8s.io/apiserver/pkg/util/flag"
@@ -182,9 +187,12 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 		s.BindAddress = s.Listener.Addr().(*net.TCPAddr).IP
 	}
 
-	*config = &server.SecureServingInfo{
-		Listener:                     s.Listener,
-		HTTP2MaxStreamsPerConnection: s.HTTP2MaxStreamsPerConnection,
+	secureServingInfo := &server.SecureServingInfo{
+		BindAddress: net.JoinHostPort(s.BindAddress.String(), strconv.Itoa(s.BindPort)),
+		// NOTE(dperny): this change is not in the kubernetes mainline; it is only
+		// in this fork. Import tlsconfig so we can use its default cipher suites
+		// in the kubernetes api server.
+		CipherSuites: tlsconfig.DefaultServerAcceptedCiphers,
 	}
 	c := *config
 
