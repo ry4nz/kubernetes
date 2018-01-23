@@ -1,7 +1,6 @@
 package ucpauthz
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -239,14 +238,6 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 		}
 	}
 
-	hasVolumeAccess, msg, err := a.hasVolumeAccess(user, podSpec)
-	if err != nil {
-		return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has volume access for resource %s: %s", user, attributes.GetName(), err))
-	}
-	if !hasVolumeAccess {
-		return admission.NewForbidden(attributes, fmt.Errorf(msg))
-	}
-
 	return nil
 }
 
@@ -359,63 +350,6 @@ func (a *ucpAuthz) isAdmin(username string) (bool, error) {
 	default:
 		return false, fmt.Errorf("unknown response \"%s\" while verifying if user %s is an admin", msgStr, username)
 	}
-}
-
-func (a *ucpAuthz) hasVolumeAccess(username string, podSpec *api.PodSpec) (bool, string, error) {
-	volumes := []string{}
-	for _, v := range podSpec.Volumes {
-		if v.VolumeSource.FlexVolume != nil && v.VolumeSource.FlexVolume.Driver == "docker-plugin/local" {
-			volumes = append(volumes, v.Name)
-		}
-	}
-	if len(volumes) == 0 {
-		return true, "", nil
-	}
-
-	req := kubeVolumeAccessRequest{Volumes: volumes}
-	u, err := url.Parse(a.ucpLocation)
-	if err != nil {
-		return false, "", fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
-	}
-	u.Path = volumeAccessPath
-	q := u.Query()
-	q.Set("user", username)
-	u.RawQuery = q.Encode()
-
-	jsonReq, err := json.Marshal(req)
-	if err != nil {
-		return false, "", fmt.Errorf("unable to marshal volume access request: %s", err)
-	}
-	resp, err := a.httpClient.Post(u.String(), "application/json", bytes.NewBuffer(jsonReq))
-	if err != nil {
-		return false, "", fmt.Errorf("unable to get volume access for user \"%s\" at %s: %s", username, u.String(), err)
-	}
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return false, "", fmt.Errorf("unable to get volume access for user \"%s\" at %s: received status code %d but unable to read response message: %s", username, u.String(), resp.StatusCode, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, "", fmt.Errorf("unable to get volume access for user \"%s\" at %s: received status code %d: %s", username, u.String(), resp.StatusCode, string(body))
-	}
-
-	var volumeAccessResponse kubeVolumeAccessResponse
-	err = json.Unmarshal(body, &volumeAccessResponse)
-	if err != nil {
-		return false, "", fmt.Errorf("unable to get volume access for user \"%s\" at %s: unable to unmarshal response: %s", username, u.String(), resp.StatusCode, string(body))
-	}
-
-	for _, v := range volumes {
-		respVolume, ok := volumeAccessResponse.Volumes[v]
-		if !ok {
-			return false, "", fmt.Errorf("volume %s was not in the volume access API response", v)
-		}
-		if !respVolume.Allowed {
-			return false, fmt.Sprintf("user \"%s\" does not have access to volume %s: %s", username, v, respVolume.Reason), nil
-		}
-	}
-	return true, "", nil
 }
 
 // NewUCPAuthz returns a signing policy handler
