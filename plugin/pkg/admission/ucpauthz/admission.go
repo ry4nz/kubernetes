@@ -248,7 +248,7 @@ func (a *ucpAuthz) deleteAgent(namespace, name string) error {
 	if err != nil {
 		return fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
 	}
-	serviceAccountID := fmt.Sprintf("serviceaccount:%s:%s", namespace, name)
+	serviceAccountID := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, name)
 	u.Path = fmt.Sprintf(agentPathTemplate, serviceAccountID)
 
 	req, err := http.NewRequest("DELETE", u.String(), nil)
@@ -355,7 +355,7 @@ func (a *ucpAuthz) isAdmin(username string) (bool, error) {
 // NewUCPAuthz returns a signing policy handler
 func NewUCPAuthz(httpClient *http.Client) admission.Interface {
 	return &ucpAuthz{
-		Handler:      admission.NewHandler(admission.Create, admission.Update),
+		Handler:      admission.NewHandler(admission.Create, admission.Update, admission.Delete),
 		ucpLocation:  os.Getenv("UCP_URL"),
 		httpClient:   httpClient,
 		systemPrefix: os.Getenv("SYSTEM_PREFIX"),
