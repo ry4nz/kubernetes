@@ -186,7 +186,7 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 
 	// For stacks, annotate the object with the user that issued this request
 	// to let authorization happen via impersonation.
-	if attributes.GetKind().Kind == "Stack" {
+	if attributes.GetKind().Kind == "Stack" && attributes.GetOperation() != admission.Delete {
 		stack, ok := attributes.GetObject().(*unstructured.Unstructured)
 		if !ok {
 			return fmt.Errorf("detected object of kind \"Stack\" and type %s but was expecting *unstructured.Unstructured", reflect.TypeOf(attributes.GetObject()).String())
@@ -221,6 +221,10 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
 	if podSpec == nil {
 		// The resource is not a known object type which contains a PodSpec
+		return nil
+	}
+
+	if attributes.GetOperation() == admission.Delete {
 		return nil
 	}
 
