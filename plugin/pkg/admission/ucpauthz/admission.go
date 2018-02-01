@@ -31,7 +31,7 @@ const (
 	key               = "key.pem"
 	cert              = "cert.pem"
 	rootCA            = "ca.pem"
-	isAdminPath       = "/api/authz/isadmin"
+	isFullControlPath = "/api/authz/isfullcontrol"
 	parametersPath    = "/api/authz/parameters"
 	volumeAccessPath  = "/api/authz/volumeaccess"
 	agentPathTemplate = "/api/agent/%s"
@@ -182,6 +182,7 @@ func ParamsFromPodSpec(podSpec *api.PodSpec) *authzParameters {
 
 func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	user := attributes.GetUserInfo().GetName()
+	namespace := attributes.GetNamespace()
 	log.Debugf("the user is: %s", user)
 
 	// For stacks, annotate the object with the user that issued this request
@@ -209,7 +210,6 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	// If a service account is being deleted, also delete the corresponding enzi agent.
 	if attributes.GetKind().Kind == "ServiceAccount" && attributes.GetOperation() == admission.Delete {
 		name := attributes.GetName()
-		namespace := attributes.GetNamespace()
 		return a.deleteAgent(namespace, name)
 	}
 
@@ -231,7 +231,7 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	// Inspect the podSpec for low-level request parameters
 	params := ParamsFromPodSpec(podSpec)
 	if params.HasRestrictedParameters() {
-		allowed, err := a.isAdmin(user)
+		allowed, err := a.isFullControl(user, namespace)
 		//allowed, err := a.userHasPermissions(user, params)
 		if err != nil {
 			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has fine-grained permissions \"%s\" for resource %s: %s", user, params.String(), attributes.GetName(), err))
@@ -320,14 +320,15 @@ func (a *ucpAuthz) userHasPermissions(username string, params *authzParameters) 
 	}
 }
 
-func (a *ucpAuthz) isAdmin(username string) (bool, error) {
+func (a *ucpAuthz) isFullControl(username, namespace string) (bool, error) {
 	u, err := url.Parse(a.ucpLocation)
 	if err != nil {
 		return false, fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
 	}
-	u.Path = isAdminPath
+	u.Path = isFullControlPath
 	q := u.Query()
 	q.Set("user", username)
+	q.Set("namespace", namespace)
 	u.RawQuery = q.Encode()
 
 	resp, err := a.httpClient.Get(u.String())
@@ -338,12 +339,12 @@ func (a *ucpAuthz) isAdmin(username string) (bool, error) {
 	defer resp.Body.Close()
 	msg, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return false, fmt.Errorf("unable to verify if user %s is an admin at %s: received status code %d but unable to read response message: %s", username, u.String(), resp.StatusCode, err)
+		return false, fmt.Errorf("unable to verify if user %s has full control privileges at %s: received status code %d but unable to read response message: %s", username, u.String(), resp.StatusCode, err)
 	}
 	msgStr := strings.TrimSpace(string(msg))
 
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("unable to verify if user %s is an admin at %s: received status code %d: %s", username, u.String(), resp.StatusCode, msgStr)
+		return false, fmt.Errorf("unable to verify if user %s has full control privileges at %s: received status code %d: %s", username, u.String(), resp.StatusCode, msgStr)
 	}
 
 	switch msgStr {
