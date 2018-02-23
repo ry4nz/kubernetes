@@ -2,9 +2,9 @@ package ucpnodeselector
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,11 +39,20 @@ const (
 	queryKey = "user"
 
 	kubeSystemNamespace = "kube-system"
+)
 
-	tolerationKey = "com.docker.ucp.orchestrator.kubernetes"
+var (
+	orchestratorToleration = api.Toleration{
+		Key:      "com.docker.ucp.orchestrator.kubernetes",
+		Operator: api.TolerationOpExists,
+		// Zero value for Effect matches all taint effects.
+	}
 
-	ucpSystemCollectionLabel = "com.docker.ucp.collection.system"
-	ucpCollectionLabelValue  = "true"
+	systemToleration = api.Toleration{
+		Key:      "com.docker.ucp.manager",
+		Operator: api.TolerationOpExists,
+		// Zero value for Effect matches all taint effects.
+	}
 )
 
 const (
@@ -96,7 +105,7 @@ type ucpNodeSelector struct {
 }
 
 // Admit handles resources that are passed through this admission controller
-func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
+func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
 	object := attributes.GetObject()
 
 	// Jobs don't support PodTemplateSpec updates.
@@ -109,56 +118,66 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 
-	// UCP adds a tolerationKey:NoExecute taint to swarm-only nodes to keep user pods off.
-	// First, remove any toleration with that key.
 	var tolerations []api.Toleration
+	// UCP adds an orchestratorToleration.Key:NoExecute taint to swarm-only
+	// nodes and adds a systemToleration.Key:NoSchedule taint to manager/DTR
+	// nodes. Remove tolerations with these keys from the pod if they are present.
 	for _, t := range podSpec.Tolerations {
-		if t.Key != tolerationKey {
+		if t.Key != orchestratorToleration.Key && t.Key != systemToleration.Key {
 			tolerations = append(tolerations, t)
 		}
 	}
-	// Second, add a tolerationKey:* toleration to kube-system pods so they can run on swarm-only nodes.
+
 	if attributes.GetNamespace() == kubeSystemNamespace {
-		tolerations = append(tolerations, api.Toleration{
-			Key:      tolerationKey,
-			Operator: api.TolerationOpExists,
-			// Zero value for Effect matches all taint effects.
-		})
-	}
-	podSpec.Tolerations = tolerations
-
-	// Pods don't support node affinity updates.
-	if _, ok := object.(*api.Pod); ok && attributes.GetOperation() == admission.Update {
-		return nil
-	}
-
-	nodeAffinityRequirements := []api.NodeSelectorTerm{}
-	user := attributes.GetUserInfo().GetName()
-	hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
-	isSystemUser := false
-	for _, systemUser := range systemUsers {
-		if user == systemUser {
-			isSystemUser = true
-			break
+		// Check if the kube-system pod has the orchestrator and system tolerations
+		// already.
+		var hasOrchestratorToleration, hasSystemToleration bool
+		// Note: We check the actual pod tolerations here.
+		for _, t := range podSpec.Tolerations {
+			if t == orchestratorToleration {
+				hasOrchestratorToleration = true
+			} else if t == systemToleration {
+				hasSystemToleration = true
+			}
 		}
-	}
-	if !(isSystemUser || hasSystemPrefix) {
+		if hasOrchestratorToleration && hasSystemToleration {
+			// If these tolerations are already present, we have nothing to do.
+			return nil
+		}
+		// Add an orchestratorToleration and a systemToleration to kube-system pods
+		// so they can run on swarm-only, UCP manager, and DTR nodes.
+		// Note: We add both these tolerations to the `tolerations` list, not to the
+		// actual pod tolerations.
+		tolerations = append(tolerations, orchestratorToleration)
+		tolerations = append(tolerations, systemToleration)
+	} else {
+		user := attributes.GetUserInfo().GetName()
+		hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
+		isSystemUser := false
+		for _, systemUser := range systemUsers {
+			if user == systemUser {
+				isSystemUser = true
+				break
+			}
+		}
+
+		if hasSystemPrefix || isSystemUser {
+			// If this is a system pod, do not modify it.
+			return nil
+		}
+
 		allowsManagerScheduling, err := a.allowsManagerScheduling(user)
 		if err != nil {
 			return apierrors.NewInternalError(err)
 		}
-		if !allowsManagerScheduling {
-			matchExpressions := []api.NodeSelectorRequirement{{
-				Key:      ucpSystemCollectionLabel,
-				Operator: api.NodeSelectorOpNotIn,
-				Values:   []string{ucpCollectionLabelValue},
-			}}
-			nodeAffinityRequirements = append(nodeAffinityRequirements, api.NodeSelectorTerm{
-				MatchExpressions: matchExpressions,
-			})
+		if allowsManagerScheduling {
+			// Add a systemToleration to pods run by users who are allowed to schedule
+			// on manager/DTR nodes.
+			tolerations = append(tolerations, systemToleration)
 		}
 	}
-	addNodeAffinityRequirementsToPodSpec(podSpec, nodeAffinityRequirements)
+
+	podSpec.Tolerations = tolerations
 
 	return nil
 }
@@ -173,10 +192,12 @@ func NewUCPNodeSelector(httpClient *http.Client) admission.Interface {
 	}
 }
 
+// allowsManagerScheduling takes a username and returns if the user is allowed
+// to schedule pods on a manager/DTR node.
 func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error) {
 	u, err := url.Parse(a.ucpLocation)
 	if err != nil {
-		return false, fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
+		return false, fmt.Errorf("unable to parse UCP location %q: %s", a.ucpLocation, err)
 	}
 	u.Path = apiPath
 	q := u.Query()
@@ -185,41 +206,13 @@ func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error)
 
 	resp, err := a.httpClient.Get(u.String())
 	if err != nil {
-		return false, fmt.Errorf("unable to lookup manager scheduling settings for user \"%s\" at %s: %s", username, u.String(), err)
+		return false, fmt.Errorf("unable to perform request for user %q at %s: %s", username, u.String(), err)
 	}
-
 	defer resp.Body.Close()
-	msg, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("unable to lookup manager scheduling settings for user \"%s\": received status code %d but unable to read response message: %s", username, resp.StatusCode, err)
-	}
-	msgStr := strings.TrimSpace(string(msg))
 
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("unable to lookup manager scheduling settings for user \"%s\": received status code %d: %s", username, resp.StatusCode, msgStr)
+	res := false
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return false, fmt.Errorf("unable to unmarshal response: %s", err)
 	}
-
-	switch msgStr {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("unknown response \"%s\" while looking manager scheduling settings for user \"%s\"", msgStr, username)
-	}
-}
-
-func addNodeAffinityRequirementsToPodSpec(podSpec *api.PodSpec, nodeAffinityRequirements []api.NodeSelectorTerm) {
-	if len(nodeAffinityRequirements) > 0 {
-		if podSpec.Affinity == nil {
-			podSpec.Affinity = &api.Affinity{}
-		}
-		if podSpec.Affinity.NodeAffinity == nil {
-			podSpec.Affinity.NodeAffinity = &api.NodeAffinity{}
-		}
-		if podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-			podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &api.NodeSelector{}
-		}
-		podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, nodeAffinityRequirements...)
-	}
+	return res, nil
 }
