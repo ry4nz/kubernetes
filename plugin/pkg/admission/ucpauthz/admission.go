@@ -57,6 +57,10 @@ type kubeVolumeAccessResponse struct {
 	Volumes map[string]volumeAccessInfo `json:"volumes"`
 }
 
+const (
+	PluginName = "UCPAuthorization"
+)
+
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
 	plugins.Register(PluginName, func(config io.Reader) (admission.Interface, error) {
