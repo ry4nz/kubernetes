@@ -221,12 +221,9 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 		s.BindAddress = s.Listener.Addr().(*net.TCPAddr).IP
 	}
 
-	secureServingInfo := &server.SecureServingInfo{
-		BindAddress: net.JoinHostPort(s.BindAddress.String(), strconv.Itoa(s.BindPort)),
-		// NOTE(dperny): this change is not in the kubernetes mainline; it is only
-		// in this fork. Import tlsconfig so we can use its default cipher suites
-		// in the kubernetes api server.
-		CipherSuites: tlsconfig.DefaultServerAcceptedCiphers,
+	*config = &server.SecureServingInfo{
+		Listener:                     s.Listener,
+		HTTP2MaxStreamsPerConnection: s.HTTP2MaxStreamsPerConnection,
 	}
 	c := *config
 
@@ -249,6 +246,11 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 		}
 		c.CipherSuites = cipherSuites
 	}
+
+	// NOTE(dperny): this change is not in the kubernetes mainline; it is only
+	// in this fork. Import tlsconfig so we can use its default cipher suites
+	// in the kubernetes api server.
+	c.CipherSuites = tlsconfig.DefaultServerAcceptedCiphers
 
 	var err error
 	c.MinTLSVersion, err = cliflag.TLSVersion(s.MinTLSVersion)
