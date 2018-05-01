@@ -106,7 +106,7 @@ func (a *signingPolicy) SetInternalKubeClientSet(internalKubeClient internalclie
 	a.internalKubeClient = internalKubeClient
 }
 
-func (a *signingPolicy) Validate() error {
+func (a *signingPolicy) ValidateInitialization() error {
 	if a.internalKubeClient == nil {
 		return fmt.Errorf("missing internal kube client")
 	}

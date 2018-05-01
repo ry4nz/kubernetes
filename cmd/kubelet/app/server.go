@@ -800,16 +800,6 @@ func InitializeTLS(kf *options.KubeletFlags, kc *kubeletconfiginternal.KubeletCo
 		}
 	}
 
-	tlsCipherSuites, err := flag.TLSCipherSuites(kc.TLSCipherSuites)
-	if err != nil {
-		return nil, err
-	}
-
-	minTLSVersion, err := flag.TLSVersion(kc.TLSMinVersion)
-	if err != nil {
-		return nil, err
-	}
-
 	tlsOptions := &server.TLSOptions{
 		Config: &tls.Config{
 			// Can't use SSLv3 because of POODLE and BEAST
