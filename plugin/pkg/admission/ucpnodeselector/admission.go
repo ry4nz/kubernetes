@@ -44,6 +44,10 @@ const (
 	ucpCollectionLabelValue  = "true"
 )
 
+const (
+	PluginName = "UCPNodeSelector"
+)
+
 var systemUsers = []string{
 	authUser.APIServerUser,
 	authUser.KubeProxy,
@@ -53,7 +57,7 @@ var systemUsers = []string{
 
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
-	plugins.Register("UCPNodeSelector", func(config io.Reader) (admission.Interface, error) {
+	plugins.Register(PluginName, func(config io.Reader) (admission.Interface, error) {
 		var tlsConfig *tls.Config
 		var err error
 		certDir := os.Getenv("CERT_DIR")

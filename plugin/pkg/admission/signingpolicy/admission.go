@@ -34,6 +34,10 @@ const (
 	apiPath = "/api/dct/resolveimage"
 )
 
+const (
+	PluginName = "CheckImageSigning"
+)
+
 type dctResolveImageResponse struct {
 	ResolvedImages map[string]string `json:"resolvedImages"`
 	ErrorMessages  []string          `json:"errorMessages"`
@@ -41,7 +45,7 @@ type dctResolveImageResponse struct {
 
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
-	plugins.Register("CheckImageSigning", func(config io.Reader) (admission.Interface, error) {
+	plugins.Register(PluginName, func(config io.Reader) (admission.Interface, error) {
 		var tlsConfig *tls.Config
 		var err error
 
