@@ -16,7 +16,11 @@ limitations under the License.
 
 package printers
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+)
 
 // KubeTemplatePrintFlags composes print flags that provide both a JSONPath and a go-template printer.
 // This is necessary if dealing with cases that require support both both printers, since both sets of flags
@@ -29,8 +33,12 @@ type KubeTemplatePrintFlags struct {
 	TemplateArgument *string
 }
 
+func (f *KubeTemplatePrintFlags) AllowedFormats() []string {
+	return append(f.GoTemplatePrintFlags.AllowedFormats(), f.JSONPathPrintFlags.AllowedFormats()...)
+}
+
 func (f *KubeTemplatePrintFlags) ToPrinter(outputFormat string) (ResourcePrinter, error) {
-	if p, err := f.JSONPathPrintFlags.ToPrinter(outputFormat); !IsNoCompatiblePrinterError(err) {
+	if p, err := f.JSONPathPrintFlags.ToPrinter(outputFormat); !genericclioptions.IsNoCompatiblePrinterError(err) {
 		return p, err
 	}
 	return f.GoTemplatePrintFlags.ToPrinter(outputFormat)

@@ -20,11 +20,10 @@ import (
 	"fmt"
 	"io"
 
-	"k8s.io/client-go/dynamic"
-	"k8s.io/kubernetes/pkg/printers"
-
 	"github.com/docker/distribution/reference"
 	"github.com/spf13/cobra"
+
+	"k8s.io/client-go/dynamic"
 
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -41,6 +40,7 @@ import (
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
+	"k8s.io/kubernetes/pkg/kubectl/polymorphichelpers"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/util/interrupt"
@@ -97,7 +97,7 @@ type RunObject struct {
 }
 
 type RunOptions struct {
-	PrintFlags    *printers.PrintFlags
+	PrintFlags    *genericclioptions.PrintFlags
 	DeleteFlags   *DeleteFlags
 	DeleteOptions *DeleteOptions
 	RecordFlags   *genericclioptions.RecordFlags
@@ -126,7 +126,7 @@ type RunOptions struct {
 
 func NewRunOptions(streams genericclioptions.IOStreams) *RunOptions {
 	return &RunOptions{
-		PrintFlags:  printers.NewPrintFlags("created", legacyscheme.Scheme),
+		PrintFlags:  genericclioptions.NewPrintFlags("created").WithTypeSetter(scheme.Scheme),
 		DeleteFlags: NewDeleteFlags("to use to replace the resource."),
 		RecordFlags: genericclioptions.NewRecordFlags(),
 
@@ -193,7 +193,7 @@ func addRunFlags(cmd *cobra.Command, opt *RunOptions) {
 func (o *RunOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 	var err error
 
-	o.RecordFlags.Complete(f.Command(cmd, false))
+	o.RecordFlags.Complete(cmd)
 	o.Recorder, err = o.RecordFlags.ToRecorder()
 	if err != nil {
 		return err
@@ -223,11 +223,10 @@ func (o *RunOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 		return printer.PrintObj(obj, o.Out)
 	}
 
-	deleteOpts := o.DeleteFlags.ToOptions(o.IOStreams)
+	deleteOpts := o.DeleteFlags.ToOptions(o.DynamicClient, o.IOStreams)
 	deleteOpts.IgnoreNotFound = true
 	deleteOpts.WaitForDeletion = false
 	deleteOpts.GracePeriod = -1
-	deleteOpts.Reaper = f.Reaper
 
 	o.DeleteOptions = deleteOpts
 
@@ -266,7 +265,7 @@ func (o *RunOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []string) e
 		return cmdutil.UsageErrorf(cmd, "--port must be set when exposing a service")
 	}
 
-	namespace, _, err := f.DefaultNamespace()
+	namespace, _, err := f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
 	}
@@ -322,7 +321,7 @@ func (o *RunOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []string) e
 		}
 	}
 
-	generators := f.Generators("run")
+	generators := cmdutil.GeneratorFn("run")
 	generator, found := generators[generatorName]
 	if !found {
 		return cmdutil.UsageErrorf(cmd, "generator %q not found", generatorName)
@@ -374,7 +373,7 @@ func (o *RunOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []string) e
 
 			Attach: &DefaultRemoteAttach{},
 		}
-		config, err := f.ClientConfig()
+		config, err := f.ToRESTConfig()
 		if err != nil {
 			return err
 		}
@@ -386,7 +385,7 @@ func (o *RunOptions) Run(f cmdutil.Factory, cmd *cobra.Command, args []string) e
 		}
 		opts.PodClient = clientset.Core()
 
-		attachablePod, err := f.AttachablePodForObject(runObject.Object, opts.GetPodTimeout)
+		attachablePod, err := polymorphichelpers.AttachablePodForObjectFn(f, runObject.Object, opts.GetPodTimeout)
 		if err != nil {
 			return err
 		}
@@ -459,14 +458,7 @@ func (o *RunOptions) removeCreatedObjects(f cmdutil.Factory, createdObjects []*R
 			ResourceNames(obj.Mapping.Resource.Resource+"."+obj.Mapping.Resource.Group, name).
 			Flatten().
 			Do()
-		// Note: we pass in "true" for the "quiet" parameter because
-		// ReadResult will only print one thing based on the "quiet"
-		// flag, and that's the "pod xxx deleted" message. If they
-		// asked for us to remove the pod (via --rm) then telling them
-		// its been deleted is unnecessary since that's what they asked
-		// for. We should only print something if the "rm" fails.
-		err = o.DeleteOptions.ReapResult(r, true, true)
-		if err != nil {
+		if err := o.DeleteOptions.DeleteResult(r); err != nil {
 			return err
 		}
 	}
@@ -525,13 +517,13 @@ func handleAttachPod(f cmdutil.Factory, podClient coreclient.PodsGetter, ns, nam
 }
 
 // logOpts logs output from opts to the pods log.
-func logOpts(f cmdutil.Factory, pod *api.Pod, opts *AttachOptions) error {
+func logOpts(restClientGetter genericclioptions.RESTClientGetter, pod *api.Pod, opts *AttachOptions) error {
 	ctrName, err := opts.GetContainerName(pod)
 	if err != nil {
 		return err
 	}
 
-	req, err := f.LogsForObject(pod, &api.PodLogOptions{Container: ctrName}, opts.GetPodTimeout)
+	req, err := polymorphichelpers.LogsForObjectFn(restClientGetter, pod, &api.PodLogOptions{Container: ctrName}, opts.GetPodTimeout)
 	if err != nil {
 		return err
 	}
@@ -581,7 +573,7 @@ func verifyImagePullPolicy(cmd *cobra.Command) error {
 }
 
 func (o *RunOptions) generateService(f cmdutil.Factory, cmd *cobra.Command, serviceGenerator string, paramsIn map[string]interface{}, namespace string) (*RunObject, error) {
-	generators := f.Generators("expose")
+	generators := cmdutil.GeneratorFn("expose")
 	generator, found := generators[serviceGenerator]
 	if !found {
 		return nil, fmt.Errorf("missing service generator: %s", serviceGenerator)
@@ -638,7 +630,7 @@ func (o *RunOptions) createGeneratedObject(f cmdutil.Factory, cmd *cobra.Command
 		return nil, err
 	}
 
-	mapper, err := f.RESTMapper()
+	mapper, err := f.ToRESTMapper()
 	if err != nil {
 		return nil, err
 	}

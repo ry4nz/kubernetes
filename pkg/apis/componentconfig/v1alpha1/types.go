@@ -286,6 +286,28 @@ type KubeControllerManagerConfiguration struct {
 	ExternalCloudVolumePlugin string `json:"externalCloudVolumePlugin"`
 }
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type CloudControllerManagerConfiguration struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// CloudProviderConfiguration holds configuration for CloudProvider related features.
+	CloudProvider CloudProviderConfiguration
+	// DebuggingConfiguration holds configuration for Debugging related features.
+	Debugging DebuggingConfiguration
+	// GenericComponentConfiguration holds configuration for GenericComponent
+	// related features both in cloud controller manager and kube-controller manager.
+	GenericComponent GenericComponentConfiguration
+	// KubeCloudSharedConfiguration holds configuration for shared related features
+	// both in cloud controller manager and kube-controller manager.
+	KubeCloudShared KubeCloudSharedConfiguration
+	// ServiceControllerConfiguration holds configuration for ServiceController
+	// related features.
+	ServiceController ServiceControllerConfiguration
+	// NodeStatusUpdateFrequency is the frequency at which the controller updates nodes' status
+	NodeStatusUpdateFrequency metav1.Duration
+}
+
 type CloudProviderConfiguration struct {
 	// Name is the provider for cloud services.
 	Name string `json:"cloudProvider"`
@@ -344,9 +366,6 @@ type KubeCloudSharedConfiguration struct {
 	// configureCloudRoutes enables CIDRs allocated with allocateNodeCIDRs
 	// to be configured on the cloud provider.
 	ConfigureCloudRoutes *bool `json:"configureCloudRoutes"`
-	// serviceAccountKeyFile is the filename containing a PEM-encoded private RSA key
-	// used to sign service account tokens.
-	ServiceAccountKeyFile string `json:"serviceAccountKeyFile"`
 	// nodeSyncPeriod is the period for syncing nodes from cloudprovider. Longer
 	// periods will result in fewer calls to cloud provider, but may delay addition
 	// of new nodes to cluster.
@@ -527,6 +546,9 @@ type ResourceQuotaControllerConfiguration struct {
 }
 
 type SAControllerConfiguration struct {
+	// serviceAccountKeyFile is the filename containing a PEM-encoded private RSA key
+	// used to sign service account tokens.
+	ServiceAccountKeyFile string `json:"serviceAccountKeyFile"`
 	// concurrentSATokenSyncs is the number of service account token syncing operations
 	// that will be done concurrently.
 	ConcurrentSATokenSyncs int32 `json:"concurrentSATokenSyncs"`

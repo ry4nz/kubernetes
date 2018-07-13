@@ -20,6 +20,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+	genericprinters "k8s.io/kubernetes/pkg/kubectl/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/printers"
 )
 
@@ -27,9 +29,11 @@ import (
 // used across all config commands, and provides a method
 // of retrieving a known printer based on flag values provided.
 type kubectlConfigPrintFlags struct {
-	JSONYamlPrintFlags *printers.JSONYamlPrintFlags
-	NamePrintFlags     *printers.NamePrintFlags
+	JSONYamlPrintFlags *genericclioptions.JSONYamlPrintFlags
+	NamePrintFlags     *genericclioptions.NamePrintFlags
 	TemplateFlags      *printers.KubeTemplatePrintFlags
+
+	TypeSetter *genericprinters.TypeSetterPrinter
 
 	OutputFormat *string
 }
@@ -38,25 +42,32 @@ func (f *kubectlConfigPrintFlags) Complete(successTemplate string) error {
 	return f.NamePrintFlags.Complete(successTemplate)
 }
 
+func (f *kubectlConfigPrintFlags) AllowedFormats() []string {
+	formats := f.JSONYamlPrintFlags.AllowedFormats()
+	formats = append(formats, f.NamePrintFlags.AllowedFormats()...)
+	formats = append(formats, f.TemplateFlags.AllowedFormats()...)
+	return formats
+}
+
 func (f *kubectlConfigPrintFlags) ToPrinter() (printers.ResourcePrinter, error) {
 	outputFormat := ""
 	if f.OutputFormat != nil {
 		outputFormat = *f.OutputFormat
 	}
 
-	if p, err := f.JSONYamlPrintFlags.ToPrinter(outputFormat); !printers.IsNoCompatiblePrinterError(err) {
-		return p, err
+	if p, err := f.JSONYamlPrintFlags.ToPrinter(outputFormat); !genericclioptions.IsNoCompatiblePrinterError(err) {
+		return f.TypeSetter.WrapToPrinter(p, err)
 	}
 
-	if p, err := f.NamePrintFlags.ToPrinter(outputFormat); !printers.IsNoCompatiblePrinterError(err) {
-		return p, err
+	if p, err := f.NamePrintFlags.ToPrinter(outputFormat); !genericclioptions.IsNoCompatiblePrinterError(err) {
+		return f.TypeSetter.WrapToPrinter(p, err)
 	}
 
-	if p, err := f.TemplateFlags.ToPrinter(outputFormat); !printers.IsNoCompatiblePrinterError(err) {
-		return p, err
+	if p, err := f.TemplateFlags.ToPrinter(outputFormat); !genericclioptions.IsNoCompatiblePrinterError(err) {
+		return f.TypeSetter.WrapToPrinter(p, err)
 	}
 
-	return nil, printers.NoCompatiblePrinterError{Options: f}
+	return nil, genericclioptions.NoCompatiblePrinterError{OutputFormat: &outputFormat, AllowedFormats: f.AllowedFormats()}
 }
 
 func (f *kubectlConfigPrintFlags) AddFlags(cmd *cobra.Command) {
@@ -75,14 +86,16 @@ func (f *kubectlConfigPrintFlags) WithDefaultOutput(output string) *kubectlConfi
 	return f
 }
 
-func newKubeConfigPrintFlags(scheme runtime.ObjectConvertor) *kubectlConfigPrintFlags {
+func newKubeConfigPrintFlags(scheme runtime.ObjectTyper) *kubectlConfigPrintFlags {
 	outputFormat := ""
 
 	return &kubectlConfigPrintFlags{
 		OutputFormat: &outputFormat,
 
-		JSONYamlPrintFlags: printers.NewJSONYamlPrintFlags(scheme),
-		NamePrintFlags:     printers.NewNamePrintFlags("", scheme),
+		JSONYamlPrintFlags: genericclioptions.NewJSONYamlPrintFlags(),
+		NamePrintFlags:     genericclioptions.NewNamePrintFlags(""),
 		TemplateFlags:      printers.NewKubeTemplatePrintFlags(),
+
+		TypeSetter: genericprinters.NewTypeSetter(scheme),
 	}
 }

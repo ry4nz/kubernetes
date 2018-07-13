@@ -22,7 +22,19 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 )
+
+// templates are logically optional for specifying a format.
+// this allows a user to specify a template format value
+// as --output=go-template=
+var templateFormats = map[string]bool{
+	"template":         true,
+	"go-template":      true,
+	"go-template-file": true,
+	"templatefile":     true,
+}
 
 // GoTemplatePrintFlags provides default flags necessary for template printing.
 // Given the following flag values, a printer can be requested that knows
@@ -34,28 +46,26 @@ type GoTemplatePrintFlags struct {
 	TemplateArgument *string
 }
 
+func (f *GoTemplatePrintFlags) AllowedFormats() []string {
+	formats := make([]string, 0, len(templateFormats))
+	for format := range templateFormats {
+		formats = append(formats, format)
+	}
+	return formats
+}
+
 // ToPrinter receives an templateFormat and returns a printer capable of
 // handling --template format printing.
 // Returns false if the specified templateFormat does not match a template format.
 func (f *GoTemplatePrintFlags) ToPrinter(templateFormat string) (ResourcePrinter, error) {
 	if (f.TemplateArgument == nil || len(*f.TemplateArgument) == 0) && len(templateFormat) == 0 {
-		return nil, NoCompatiblePrinterError{Options: f, OutputFormat: &templateFormat}
+		return nil, genericclioptions.NoCompatiblePrinterError{Options: f, OutputFormat: &templateFormat}
 	}
 
 	templateValue := ""
 
-	// templates are logically optional for specifying a format.
-	// this allows a user to specify a template format value
-	// as --output=go-template=
-	supportedFormats := map[string]bool{
-		"template":         true,
-		"go-template":      true,
-		"go-template-file": true,
-		"templatefile":     true,
-	}
-
 	if f.TemplateArgument == nil || len(*f.TemplateArgument) == 0 {
-		for format := range supportedFormats {
+		for format := range templateFormats {
 			format = format + "="
 			if strings.HasPrefix(templateFormat, format) {
 				templateValue = templateFormat[len(format):]
@@ -67,8 +77,8 @@ func (f *GoTemplatePrintFlags) ToPrinter(templateFormat string) (ResourcePrinter
 		templateValue = *f.TemplateArgument
 	}
 
-	if _, supportedFormat := supportedFormats[templateFormat]; !supportedFormat {
-		return nil, NoCompatiblePrinterError{Options: f, OutputFormat: &templateFormat}
+	if _, supportedFormat := templateFormats[templateFormat]; !supportedFormat {
+		return nil, genericclioptions.NoCompatiblePrinterError{OutputFormat: &templateFormat, AllowedFormats: f.AllowedFormats()}
 	}
 
 	if len(templateValue) == 0 {

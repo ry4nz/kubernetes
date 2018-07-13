@@ -51,8 +51,7 @@ func CreatePKIAssets(cfg *kubeadmapi.MasterConfiguration) error {
 		CreateAPIServerEtcdClientCertAndKeyFiles,
 	}
 
-	// Currently this is the only way we have to identify static pod etcd vs external etcd
-	if len(cfg.Etcd.Endpoints) == 0 {
+	if cfg.Etcd.Local != nil {
 		certActions = append(certActions, etcdCertActions...)
 	}
 
@@ -63,7 +62,7 @@ func CreatePKIAssets(cfg *kubeadmapi.MasterConfiguration) error {
 		}
 	}
 
-	glog.Infof("[certificates] valid certificates and keys now exist in %q\n", cfg.CertificatesDir)
+	fmt.Printf("[certificates] valid certificates and keys now exist in %q\n", cfg.CertificatesDir)
 
 	return nil
 }
@@ -376,9 +375,9 @@ func NewEtcdServerCertAndKey(cfg *kubeadmapi.MasterConfiguration, caCert *x509.C
 	}
 
 	config := certutil.Config{
-		CommonName: kubeadmconstants.EtcdServerCertCommonName,
+		CommonName: cfg.NodeRegistration.Name,
 		AltNames:   *altNames,
-		Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 	}
 	etcdServerCert, etcdServerKey, err := pkiutil.NewCertAndKey(caCert, caKey, config)
 	if err != nil {
@@ -397,7 +396,7 @@ func NewEtcdPeerCertAndKey(cfg *kubeadmapi.MasterConfiguration, caCert *x509.Cer
 	}
 
 	config := certutil.Config{
-		CommonName: kubeadmconstants.EtcdPeerCertCommonName,
+		CommonName: cfg.NodeRegistration.Name,
 		AltNames:   *altNames,
 		Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 	}

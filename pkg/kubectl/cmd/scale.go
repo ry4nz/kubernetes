@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	batchclient "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/typed/batch/internalversion"
 	"k8s.io/kubernetes/pkg/kubectl"
@@ -34,9 +33,9 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
-	"k8s.io/kubernetes/pkg/printers"
 )
 
 var (
@@ -69,7 +68,7 @@ var (
 type ScaleOptions struct {
 	FilenameOptions resource.FilenameOptions
 	RecordFlags     *genericclioptions.RecordFlags
-	PrintFlags      *printers.PrintFlags
+	PrintFlags      *genericclioptions.PrintFlags
 	PrintObj        printers.ResourcePrinterFunc
 
 	Selector        string
@@ -99,9 +98,9 @@ func NewScaleOptions(ioStreams genericclioptions.IOStreams) *ScaleOptions {
 	return &ScaleOptions{
 		// TODO(juanvallejo): figure out why we only support the "name" outputFormat in this command
 		// we only support "-o name" for this command, so only register the name printer
-		PrintFlags: &printers.PrintFlags{
+		PrintFlags: &genericclioptions.PrintFlags{
 			OutputFormat:   &outputFormat,
-			NamePrintFlags: printers.NewNamePrintFlags("scaled", legacyscheme.Scheme),
+			NamePrintFlags: genericclioptions.NewNamePrintFlags("scaled"),
 		},
 		RecordFlags:     genericclioptions.NewRecordFlags(),
 		CurrentReplicas: -1,
@@ -146,7 +145,7 @@ func NewCmdScale(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobr
 
 func (o *ScaleOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
 	var err error
-	o.RecordFlags.Complete(f.Command(cmd, false))
+	o.RecordFlags.Complete(cmd)
 	o.Recorder, err = o.RecordFlags.ToRecorder()
 	if err != nil {
 		return err
@@ -157,7 +156,7 @@ func (o *ScaleOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []st
 	}
 	o.PrintObj = printer.PrintObj
 
-	o.namespace, o.enforceNamespace, err = f.DefaultNamespace()
+	o.namespace, o.enforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
 	}
@@ -215,11 +214,11 @@ func (o *ScaleOptions) RunScale() error {
 	}
 
 	precondition := &kubectl.ScalePrecondition{Size: o.CurrentReplicas, ResourceVersion: o.ResourceVersion}
-	retry := kubectl.NewRetryParams(kubectl.Interval, kubectl.Timeout)
+	retry := kubectl.NewRetryParams(1*time.Second, 5*time.Minute)
 
 	var waitForReplicas *kubectl.RetryParams
 	if o.Timeout != 0 {
-		waitForReplicas = kubectl.NewRetryParams(kubectl.Interval, timeout)
+		waitForReplicas = kubectl.NewRetryParams(1*time.Second, timeout)
 	}
 
 	counter := 0
@@ -290,7 +289,7 @@ func ScaleJob(info *resource.Info, jobsClient batchclient.JobsGetter, count uint
 }
 
 func scaler(f cmdutil.Factory) (kubectl.Scaler, error) {
-	scalesGetter, err := f.ScaleClient()
+	scalesGetter, err := cmdutil.ScaleClientFn(f)
 	if err != nil {
 		return nil, err
 	}

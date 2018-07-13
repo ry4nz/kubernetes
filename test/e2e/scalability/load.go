@@ -286,10 +286,8 @@ var _ = SIGDescribe("Load capacity", func() {
 				}
 				daemonConfig.Run()
 				defer func(config *testutils.DaemonConfig) {
-					framework.ExpectNoError(framework.DeleteResourceAndPods(
+					framework.ExpectNoError(framework.DeleteResourceAndWaitForGC(
 						f.ClientSet,
-						f.InternalClientset,
-						f.ScalesGetter,
 						extensions.Kind("DaemonSet"),
 						config.Namespace,
 						config.Name,
@@ -373,10 +371,10 @@ func createClients(numberOfClients int) ([]clientset.Interface, []internalclient
 			TLSHandshakeTimeout: 10 * time.Second,
 			TLSClientConfig:     tlsConfig,
 			MaxIdleConnsPerHost: 100,
-			Dial: (&net.Dialer{
+			DialContext: (&net.Dialer{
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
-			}).Dial,
+			}).DialContext,
 		})
 		// Overwrite TLS-related fields from config to avoid collision with
 		// Transport field.
@@ -694,15 +692,9 @@ func deleteResource(wg *sync.WaitGroup, config testutils.RunObjectConfig, deleti
 	defer wg.Done()
 
 	sleepUpTo(deletingTime)
-	if framework.TestContext.GarbageCollectorEnabled && config.GetKind() != extensions.Kind("Deployment") {
-		framework.ExpectNoError(framework.DeleteResourceAndWaitForGC(
-			config.GetClient(), config.GetKind(), config.GetNamespace(), config.GetName()),
-			fmt.Sprintf("deleting %v %s", config.GetKind(), config.GetName()))
-	} else {
-		framework.ExpectNoError(framework.DeleteResourceAndPods(
-			config.GetClient(), config.GetInternalClient(), config.GetScalesGetter(), config.GetKind(), config.GetNamespace(), config.GetName()),
-			fmt.Sprintf("deleting %v %s", config.GetKind(), config.GetName()))
-	}
+	framework.ExpectNoError(framework.DeleteResourceAndWaitForGC(
+		config.GetClient(), config.GetKind(), config.GetNamespace(), config.GetName()),
+		fmt.Sprintf("deleting %v %s", config.GetKind(), config.GetName()))
 }
 
 func CreateNamespaces(f *framework.Framework, namespaceCount int, namePrefix string, testPhase *timer.Phase) ([]*v1.Namespace, error) {

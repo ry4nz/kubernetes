@@ -688,6 +688,7 @@ items:
     verbs:
     - create
     - delete
+    - get
     - list
     - watch
   - apiGroups:
@@ -1098,6 +1099,7 @@ items:
     resources:
     - pods/status
     verbs:
+    - patch
     - update
   - apiGroups:
     - ""
@@ -1112,6 +1114,8 @@ items:
     - secrets
     verbs:
     - get
+    - list
+    - watch
   - apiGroups:
     - ""
     resources:
@@ -1134,6 +1138,14 @@ items:
     - get
     - list
     - watch
+  - apiGroups:
+    - ""
+    resources:
+    - persistentvolumeclaims/status
+    verbs:
+    - get
+    - patch
+    - update
   - apiGroups:
     - storage.k8s.io
     resources:

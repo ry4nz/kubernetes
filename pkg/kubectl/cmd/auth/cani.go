@@ -97,7 +97,7 @@ func NewCmdCanI(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.C
 
 			allowed, err := o.RunAccessCheck()
 			if err == nil {
-				if o.Quiet && !allowed {
+				if !allowed {
 					os.Exit(1)
 				}
 			}
@@ -125,7 +125,7 @@ func (o *CanIOptions) Complete(f cmdutil.Factory, args []string) error {
 			break
 		}
 		resourceTokens := strings.SplitN(args[1], "/", 2)
-		restMapper, err := f.RESTMapper()
+		restMapper, err := f.ToRESTMapper()
 		if err != nil {
 			return err
 		}
@@ -146,7 +146,7 @@ func (o *CanIOptions) Complete(f cmdutil.Factory, args []string) error {
 
 	o.Namespace = ""
 	if !o.AllNamespaces {
-		o.Namespace, _, err = f.DefaultNamespace()
+		o.Namespace, _, err = f.ToRawKubeConfigLoader().Namespace()
 		if err != nil {
 			return err
 		}

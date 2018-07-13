@@ -205,7 +205,7 @@ func (e *E2EServices) startKubelet() (*server, error) {
 				"-v", "/etc/localtime:/etc/localtime:ro",
 				"-v", "/etc/machine-id:/etc/machine-id:ro",
 				"-v", filepath.Dir(kubeconfigPath)+":/etc/kubernetes",
-				"-v", "/:/rootfs:ro,rslave",
+				"-v", "/:/rootfs:rw,rslave",
 				"-v", "/run:/run",
 				"-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw",
 				"-v", "/sys:/sys:rw",
@@ -219,7 +219,7 @@ func (e *E2EServices) startKubelet() (*server, error) {
 
 			// if we will generate a kubelet config file, we need to mount that path into the container too
 			if genKubeletConfigFile {
-				cmdArgs = append(cmdArgs, "-v", filepath.Dir(kubeletConfigPath)+":"+filepath.Dir(kubeletConfigPath)+":ro")
+				cmdArgs = append(cmdArgs, "-v", filepath.Dir(kubeletConfigPath)+":"+filepath.Dir(kubeletConfigPath)+":rw")
 			}
 
 			cmdArgs = append(cmdArgs, hyperkubeImage, "/hyperkube", "kubelet", "--containerized")

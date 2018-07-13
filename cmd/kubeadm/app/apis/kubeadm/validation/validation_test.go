@@ -33,7 +33,7 @@ import (
 	utilpointer "k8s.io/kubernetes/pkg/util/pointer"
 )
 
-func TestValidateTokenDiscovery(t *testing.T) {
+func TestValidateToken(t *testing.T) {
 	var tests = []struct {
 		c        *kubeadm.NodeConfiguration
 		f        *field.Path
@@ -51,7 +51,7 @@ func TestValidateTokenDiscovery(t *testing.T) {
 		err := ValidateToken(rt.c.Token, rt.f).ToAggregate()
 		if (err == nil) != rt.expected {
 			t.Errorf(
-				"failed ValidateTokenDiscovery:\n\texpected: %t\n\t  actual: %t",
+				"failed ValidateToken:\n\texpected: %t\n\t  actual: %t",
 				rt.expected,
 				(err == nil),
 			)
@@ -104,52 +104,31 @@ func TestValidateTokenGroups(t *testing.T) {
 	}
 }
 
-func TestValidateAuthorizationModes(t *testing.T) {
+func TestValidateNodeRegistrationOptions(t *testing.T) {
 	var tests = []struct {
-		s        []string
-		f        *field.Path
-		expected bool
+		nodeName       string
+		criSocket      string
+		expectedErrors bool
 	}{
-		{[]string{""}, nil, false},
-		{[]string{"rBAC"}, nil, false},                               // mode not supported
-		{[]string{"rBAC", "Webhook"}, nil, false},                    // mode not supported
-		{[]string{"RBAC", "Webhook"}, nil, false},                    // mode Node required
-		{[]string{"Node", "RBAC", "Webhook", "Webhook"}, nil, false}, // no duplicates allowed
-		{[]string{"not valid"}, nil, false},                          // invalid mode
-		{[]string{"Node", "RBAC"}, nil, true},                        // supported
-		{[]string{"RBAC", "Node"}, nil, true},                        // supported
-		{[]string{"Node", "RBAC", "Webhook", "ABAC"}, nil, true},     // supported
+		{"", "/some/path", true},                                                      // node name can't be empty
+		{"valid-nodename", "", true},                                                  // crisocket can't be empty
+		{"INVALID-NODENAME", "/some/path", true},                                      // Upper cases is invalid
+		{"invalid-nodename-", "/some/path", true},                                     // Can't have trailing dashes
+		{"invalid-node?name", "/some/path", true},                                     // Unsupported characters
+		{"valid-nodename", "relative/path", true},                                     // crisocket must be an absolute path
+		{"valid-nodename", "/some/path", false},                                       // supported
+		{"valid-nodename-with-numbers01234", "/some/path/with/numbers/01234/", false}, // supported, with numbers as well
 	}
 	for _, rt := range tests {
-		actual := ValidateAuthorizationModes(rt.s, rt.f)
-		if (len(actual) == 0) != rt.expected {
+		nro := kubeadm.NodeRegistrationOptions{Name: rt.nodeName, CRISocket: rt.criSocket}
+		actual := ValidateNodeRegistrationOptions(&nro, field.NewPath("nodeRegistration"))
+		actualErrors := len(actual) > 0
+		if actualErrors != rt.expectedErrors {
 			t.Errorf(
-				"failed ValidateAuthorizationModes:\n\texpected: %t\n\t  actual: %t",
-				rt.expected,
-				(len(actual) == 0),
-			)
-		}
-	}
-}
-
-func TestValidateNodeName(t *testing.T) {
-	var tests = []struct {
-		s        string
-		f        *field.Path
-		expected bool
-	}{
-		{"", nil, false},                 // ok if not provided
-		{"1234", nil, true},              // supported
-		{"valid-nodename", nil, true},    // supported
-		{"INVALID-NODENAME", nil, false}, // Upper cases is invalid
-	}
-	for _, rt := range tests {
-		actual := ValidateNodeName(rt.s, rt.f)
-		if (len(actual) == 0) != rt.expected {
-			t.Errorf(
-				"failed ValidateNodeName:\n\texpected: %t\n\t  actual: %t",
-				rt.expected,
-				(len(actual) == 0),
+				"failed ValidateNodeRegistrationOptions: value: %v\n\texpected: %t\n\t  actual: %t",
+				nro,
+				rt.expectedErrors,
+				actualErrors,
 			)
 		}
 	}
@@ -431,13 +410,12 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1.2.3.4",
 					BindPort:         6443,
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "10.96.0.1/12",
 					DNSDomain:     "cluster.local",
 				},
-				CertificatesDir: "/some/cert/dir",
-				NodeName:        nodename,
+				CertificatesDir:  "/some/cert/dir",
+				NodeRegistration: kubeadm.NodeRegistrationOptions{Name: nodename, CRISocket: "/some/path"},
 			}, false},
 		{"invalid missing token with IPv6 service subnet",
 			&kubeadm.MasterConfiguration{
@@ -445,13 +423,12 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1.2.3.4",
 					BindPort:         6443,
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "2001:db8::1/98",
 					DNSDomain:     "cluster.local",
 				},
-				CertificatesDir: "/some/cert/dir",
-				NodeName:        nodename,
+				CertificatesDir:  "/some/cert/dir",
+				NodeRegistration: kubeadm.NodeRegistrationOptions{Name: nodename, CRISocket: "/some/path"},
 			}, false},
 		{"invalid missing node name",
 			&kubeadm.MasterConfiguration{
@@ -459,13 +436,11 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1.2.3.4",
 					BindPort:         6443,
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "10.96.0.1/12",
 					DNSDomain:     "cluster.local",
 				},
 				CertificatesDir: "/some/other/cert/dir",
-				Token:           "abcdef.0123456789abcdef",
 			}, false},
 		{"valid master configuration with incorrect IPv4 pod subnet",
 			&kubeadm.MasterConfiguration{
@@ -473,15 +448,13 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1.2.3.4",
 					BindPort:         6443,
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "10.96.0.1/12",
 					DNSDomain:     "cluster.local",
 					PodSubnet:     "10.0.1.15",
 				},
-				CertificatesDir: "/some/other/cert/dir",
-				Token:           "abcdef.0123456789abcdef",
-				NodeName:        nodename,
+				CertificatesDir:  "/some/other/cert/dir",
+				NodeRegistration: kubeadm.NodeRegistrationOptions{Name: nodename, CRISocket: "/some/path"},
 			}, false},
 		{"valid master configuration with IPv4 service subnet",
 			&kubeadm.MasterConfiguration{
@@ -489,6 +462,11 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1.2.3.4",
 					BindPort:         6443,
 				},
+				Etcd: kubeadm.Etcd{
+					Local: &kubeadm.LocalEtcd{
+						DataDir: "/some/path",
+					},
+				},
 				KubeProxy: kubeadm.KubeProxy{
 					Config: &kubeproxyconfigv1alpha1.KubeProxyConfiguration{
 						BindAddress:        "192.168.59.103",
@@ -515,15 +493,13 @@ func TestValidateMasterConfiguration(t *testing.T) {
 						},
 					},
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "10.96.0.1/12",
 					DNSDomain:     "cluster.local",
 					PodSubnet:     "10.0.1.15/16",
 				},
-				CertificatesDir: "/some/other/cert/dir",
-				Token:           "abcdef.0123456789abcdef",
-				NodeName:        nodename,
+				CertificatesDir:  "/some/other/cert/dir",
+				NodeRegistration: kubeadm.NodeRegistrationOptions{Name: nodename, CRISocket: "/some/path"},
 			}, true},
 		{"valid master configuration using IPv6 service subnet",
 			&kubeadm.MasterConfiguration{
@@ -531,6 +507,11 @@ func TestValidateMasterConfiguration(t *testing.T) {
 					AdvertiseAddress: "1:2:3::4",
 					BindPort:         3446,
 				},
+				Etcd: kubeadm.Etcd{
+					Local: &kubeadm.LocalEtcd{
+						DataDir: "/some/path",
+					},
+				},
 				KubeProxy: kubeadm.KubeProxy{
 					Config: &kubeproxyconfigv1alpha1.KubeProxyConfiguration{
 						BindAddress:        "192.168.59.103",
@@ -557,14 +538,12 @@ func TestValidateMasterConfiguration(t *testing.T) {
 						},
 					},
 				},
-				AuthorizationModes: []string{"Node", "RBAC"},
 				Networking: kubeadm.Networking{
 					ServiceSubnet: "2001:db8::1/98",
 					DNSDomain:     "cluster.local",
 				},
-				CertificatesDir: "/some/other/cert/dir",
-				Token:           "abcdef.0123456789abcdef",
-				NodeName:        nodename,
+				CertificatesDir:  "/some/other/cert/dir",
+				NodeRegistration: kubeadm.NodeRegistrationOptions{Name: nodename, CRISocket: "/some/path"},
 			}, true},
 	}
 	for _, rt := range tests {

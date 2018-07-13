@@ -19,6 +19,8 @@ package rollout
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -27,10 +29,9 @@ import (
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
+	"k8s.io/kubernetes/pkg/kubectl/polymorphichelpers"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
 	"k8s.io/kubernetes/pkg/util/interrupt"
-
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -103,13 +104,15 @@ func (o *RolloutStatusOptions) Complete(f cmdutil.Factory, args []string) error 
 	o.Builder = f.NewBuilder()
 
 	var err error
-	o.Namespace, o.EnforceNamespace, err = f.DefaultNamespace()
+	o.Namespace, o.EnforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
 	}
 
 	o.BuilderArgs = args
-	o.StatusViewer = f.StatusViewer
+	o.StatusViewer = func(mapping *meta.RESTMapping) (kubectl.StatusViewer, error) {
+		return polymorphichelpers.StatusViewerFn(f, mapping)
+	}
 	return nil
 }
 

@@ -27,15 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/apis/rbac"
 	"k8s.io/kubernetes/pkg/kubectl/cmd/templates"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/printers"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
 	"k8s.io/kubernetes/pkg/kubectl/scheme"
 	"k8s.io/kubernetes/pkg/kubectl/util/i18n"
-	"k8s.io/kubernetes/pkg/printers"
 )
 
 var (
@@ -58,7 +57,7 @@ type updateSubjects func(existings []rbacv1.Subject, targets []rbacv1.Subject) (
 // SubjectOptions is the start of the data required to perform the operation. As new fields are added, add them here instead of
 // referencing the cmd.Flags
 type SubjectOptions struct {
-	PrintFlags *printers.PrintFlags
+	PrintFlags *genericclioptions.PrintFlags
 
 	resource.FilenameOptions
 
@@ -83,7 +82,7 @@ type SubjectOptions struct {
 
 func NewSubjectOptions(streams genericclioptions.IOStreams) *SubjectOptions {
 	return &SubjectOptions{
-		PrintFlags: printers.NewPrintFlags("subjects updated", legacyscheme.Scheme),
+		PrintFlags: genericclioptions.NewPrintFlags("subjects updated").WithTypeSetter(scheme.Scheme),
 
 		IOStreams: streams,
 	}
@@ -132,7 +131,7 @@ func (o *SubjectOptions) Complete(f cmdutil.Factory, cmd *cobra.Command, args []
 	o.PrintObj = printer.PrintObj
 
 	var enforceNamespace bool
-	o.namespace, enforceNamespace, err = f.DefaultNamespace()
+	o.namespace, enforceNamespace, err = f.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return err
 	}
@@ -195,7 +194,7 @@ func (o *SubjectOptions) Validate() error {
 }
 
 func (o *SubjectOptions) Run(fn updateSubjects) error {
-	patches := CalculatePatches(o.Infos, scheme.DefaultJSONEncoder(), func(info *resource.Info) ([]byte, error) {
+	patches := CalculatePatches(o.Infos, scheme.DefaultJSONEncoder(), func(obj runtime.Object) ([]byte, error) {
 		subjects := []rbacv1.Subject{}
 		for _, user := range sets.NewString(o.Users...).List() {
 			subject := rbacv1.Subject{
@@ -228,10 +227,10 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 			subjects = append(subjects, subject)
 		}
 
-		transformed, err := updateSubjectForObject(info.Object, subjects, fn)
+		transformed, err := updateSubjectForObject(obj, subjects, fn)
 		if transformed && err == nil {
 			// TODO: switch UpdatePodSpecForObject to work on v1.PodSpec
-			return runtime.Encode(scheme.DefaultJSONEncoder(), info.Object)
+			return runtime.Encode(scheme.DefaultJSONEncoder(), obj)
 		}
 		return nil, err
 	})
@@ -252,7 +251,7 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 
 		if o.Local || o.DryRun {
 			if err := o.PrintObj(info.Object, o.Out); err != nil {
-				return err
+				allErrs = append(allErrs, err)
 			}
 			continue
 		}
@@ -263,7 +262,9 @@ func (o *SubjectOptions) Run(fn updateSubjects) error {
 			continue
 		}
 
-		return o.PrintObj(actual, o.Out)
+		if err := o.PrintObj(actual, o.Out); err != nil {
+			allErrs = append(allErrs, err)
+		}
 	}
 	return utilerrors.NewAggregate(allErrs)
 }

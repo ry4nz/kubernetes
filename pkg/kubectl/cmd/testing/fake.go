@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/meta/testrestmapper"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,7 +42,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
-	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
 	"k8s.io/kubernetes/pkg/kubectl"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -53,7 +50,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions"
 	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
 	"k8s.io/kubernetes/pkg/kubectl/validation"
-	"k8s.io/kubernetes/pkg/printers"
 )
 
 // +k8s:deepcopy-gen=true
@@ -236,13 +232,12 @@ func (d *fakeCachedDiscoveryClient) ServerResources() ([]*metav1.APIResourceList
 type TestFactory struct {
 	cmdutil.Factory
 
+	kubeConfigFlags *genericclioptions.TestConfigFlags
+
 	Client             kubectl.RESTClient
 	ScaleGetter        scaleclient.ScalesGetter
 	UnstructuredClient kubectl.RESTClient
-	DescriberVal       printers.Describer
-	Namespace          string
 	ClientConfigVal    *restclient.Config
-	CommandVal         string
 	FakeDynamicClient  *fakedynamic.FakeDynamicClient
 
 	tempConfigFile *os.File
@@ -272,11 +267,24 @@ func NewTestFactory() *TestFactory {
 		WithClientConfig(clientConfig).
 		WithRESTMapper(testRESTMapper())
 
+	restConfig, err := clientConfig.ClientConfig()
+	if err != nil {
+		panic(fmt.Sprintf("unable to create a fake restclient config: %v", err))
+	}
+
 	return &TestFactory{
 		Factory:           cmdutil.NewFactory(configFlags),
+		kubeConfigFlags:   configFlags,
 		FakeDynamicClient: fakedynamic.NewSimpleDynamicClient(legacyscheme.Scheme),
 		tempConfigFile:    tmpFile,
+
+		ClientConfigVal: restConfig,
 	}
+}
+
+func (f *TestFactory) WithNamespace(ns string) *TestFactory {
+	f.kubeConfigFlags.WithNamespace(ns)
+	return f
 }
 
 func (f *TestFactory) Cleanup() {
@@ -287,11 +295,7 @@ func (f *TestFactory) Cleanup() {
 	os.Remove(f.tempConfigFile.Name())
 }
 
-func (f *TestFactory) ClientConfig() (*restclient.Config, error) {
-	return f.ClientConfigVal, nil
-}
-
-func (f *TestFactory) BareClientConfig() (*restclient.Config, error) {
+func (f *TestFactory) ToRESTConfig() (*restclient.Config, error) {
 	return f.ClientConfigVal, nil
 }
 
@@ -306,16 +310,8 @@ func (f *TestFactory) UnstructuredClientForMapping(mapping *meta.RESTMapping) (r
 	return f.UnstructuredClient, nil
 }
 
-func (f *TestFactory) Describer(*meta.RESTMapping) (printers.Describer, error) {
-	return f.DescriberVal, nil
-}
-
 func (f *TestFactory) Validator(validate bool) (validation.Schema, error) {
 	return validation.NullSchema{}, nil
-}
-
-func (f *TestFactory) DefaultNamespace() (string, bool, error) {
-	return f.Namespace, false, nil
 }
 
 func (f *TestFactory) OpenAPISchema() (openapi.Resources, error) {
@@ -325,12 +321,8 @@ func (f *TestFactory) OpenAPISchema() (openapi.Resources, error) {
 	return openapitesting.EmptyResources{}, nil
 }
 
-func (f *TestFactory) Command(*cobra.Command, bool) string {
-	return f.CommandVal
-}
-
 func (f *TestFactory) NewBuilder() *resource.Builder {
-	mapper, err := f.RESTMapper()
+	mapper, err := f.ToRESTMapper()
 
 	return resource.NewFakeBuilder(
 		func(version schema.GroupVersion) (resource.RESTClient, error) {
@@ -425,10 +417,6 @@ func (f *TestFactory) DiscoveryClient() (discovery.CachedDiscoveryInterface, err
 	return cachedClient, nil
 }
 
-func (f *TestFactory) ClientSetForVersion(requiredVersion *schema.GroupVersion) (internalclientset.Interface, error) {
-	return f.ClientSet()
-}
-
 func testRESTMapper() meta.RESTMapper {
 	groupResources := testDynamicResources()
 	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
@@ -444,24 +432,6 @@ func testRESTMapper() meta.RESTMapper {
 	fakeDs := &fakeCachedDiscoveryClient{}
 	expander := restmapper.NewShortcutExpander(mapper, fakeDs)
 	return expander
-}
-
-func (f *TestFactory) LogsForObject(object, options runtime.Object, timeout time.Duration) (*restclient.Request, error) {
-	c, err := f.ClientSet()
-	if err != nil {
-		panic(err)
-	}
-
-	switch t := object.(type) {
-	case *api.Pod:
-		opts, ok := options.(*api.PodLogOptions)
-		if !ok {
-			return nil, errors.New("provided options object is not a PodLogOptions")
-		}
-		return c.Core().Pods(f.Namespace).GetLogs(t.Name, opts), nil
-	default:
-		return nil, fmt.Errorf("cannot get the logs from %T", object)
-	}
 }
 
 func (f *TestFactory) ScaleClient() (scaleclient.ScalesGetter, error) {

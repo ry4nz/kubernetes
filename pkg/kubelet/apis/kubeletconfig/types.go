@@ -82,6 +82,11 @@ type KubeletConfiguration struct {
 	// TLSMinVersion is the minimum TLS version supported.
 	// Values are from tls package constants (https://golang.org/pkg/crypto/tls/#pkg-constants).
 	TLSMinVersion string
+	// rotateCertificates enables client certificate rotation. The Kubelet will request a
+	// new certificate from the certificates.k8s.io API. This requires an approver to approve the
+	// certificate signing requests. The RotateKubeletClientCertificate feature
+	// must be enabled.
+	RotateCertificates bool
 	// serverTLSBootstrap enables server certificate bootstrap. Instead of self
 	// signing a serving certificate, the Kubelet will request a certificate from
 	// the certificates.k8s.io API. This requires an approver to approve the
@@ -255,7 +260,7 @@ type KubeletConfiguration struct {
 	// Maximum number of container log files that can be present for a container.
 	ContainerLogMaxFiles int32
 
-	/* following flags are meant for Node Allocatable */
+	/* the following fields are meant for Node Allocatable */
 
 	// A set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G) pairs
 	// that describe resources reserved for non-kubernetes components.
