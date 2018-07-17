@@ -152,6 +152,16 @@ func DialerFor(transport http.RoundTripper) (DialFunc, error) {
 	}
 }
 
+// ExtractRoundTripper extract the http.RoundTripper from RoundTripperWrapper recursively
+// until the http.RoundTripper does not implement RoundTripperWrapper
+func ExtractRoundTripper(rtw RoundTripperWrapper) http.RoundTripper {
+	rt := rtw.WrappedRoundTripper()
+	if rtw, ok := rt.(RoundTripperWrapper); ok {
+		return ExtractRoundTripper(rtw)
+	}
+	return rt
+}
+
 type TLSClientConfigHolder interface {
 	TLSClientConfig() *tls.Config
 }
