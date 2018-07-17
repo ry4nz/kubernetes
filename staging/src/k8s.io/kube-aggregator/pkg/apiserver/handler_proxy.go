@@ -210,11 +210,16 @@ func (r *proxyHandler) updateAPIService(apiService *apiregistrationapi.APIServic
 	}
 	newInfo.proxyRoundTripper, newInfo.transportBuildingError = restclient.TransportFor(newInfo.restConfig)
 	if newInfo.transportBuildingError == nil && r.proxyTransport != nil && r.proxyTransport.DialContext != nil {
-		switch transport := newInfo.proxyRoundTripper.(type) {
+		var roundTripper http.RoundTripper
+		roundTripper = newInfo.proxyRoundTripper
+		if rtw, ok := roundTripper.(utilnet.RoundTripperWrapper); ok {
+			roundTripper = utilnet.ExtractRoundTripper(rtw)
+		}
+		switch transport := roundTripper.(type) {
 		case *http.Transport:
 			transport.DialContext = r.proxyTransport.DialContext
 		default:
-			newInfo.transportBuildingError = fmt.Errorf("unable to set dialer for %s/%s as rest transport is of type %T", apiService.Spec.Service.Namespace, apiService.Spec.Service.Name, newInfo.proxyRoundTripper)
+			newInfo.transportBuildingError = fmt.Errorf("unable to set dialer for %s/%s as rest transport is of type %T", apiService.Spec.Service.Namespace, apiService.Spec.Service.Name, roundTripper)
 			glog.Warning(newInfo.transportBuildingError.Error())
 		}
 	}
