@@ -99,7 +99,9 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 				require.NoError(err, "Object type: %T\n", o)
 
 				expected := c.expectedTolerations
-				if _, ok := o.(*batch.Job); ok && operation == admission.Update {
+				_, isJob := object.(*batch.Job)
+				_, isPod := object.(*api.Pod)
+				if (isJob || isPod) && operation == admission.Update {
 					expected = c.initialTolerations
 				}
 				actual := ucputil.GetPodSpecFromObject(o).Tolerations
