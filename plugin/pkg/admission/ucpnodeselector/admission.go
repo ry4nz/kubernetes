@@ -108,8 +108,12 @@ type ucpNodeSelector struct {
 func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
 	object := attributes.GetObject()
 
-	// Jobs don't support PodTemplateSpec updates.
-	if _, ok := object.(*batch.Job); ok && attributes.GetOperation() == admission.Update {
+	// Jobs don't support PodTemplateSpec updates and pods don't support
+	// toleration updates.
+	_, isJob := object.(*batch.Job)
+	_, isPod := object.(*api.Pod)
+	supportsUpdate := !(isJob || isPod)
+	if !supportsUpdate && attributes.GetOperation() == admission.Update {
 		return nil
 	}
 
