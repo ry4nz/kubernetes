@@ -12,6 +12,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	"k8s.io/apiserver/pkg/authentication/user"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/rbac"
 )
 
 // TestAdmission verifies all create requests for pods result in every container's image pull policy
@@ -430,4 +431,26 @@ func TestAdmissionServiceAccountDeletion(t *testing.T) {
 	// deletion backend.
 	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
+}
+
+func TestCannotDeleteClusterAdminClusterRoleOrBinding(t *testing.T) {
+	handler := &ucpAuthz{
+		Handler: admission.NewHandler(admission.Delete),
+	}
+
+	attributesRecord := admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	err := handler.Admit(attributesRecord)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "you may not delete the cluster-admin ClusterRole or ClusterRoleBinding")
+
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	require.NoError(t, handler.Admit(attributesRecord))
+
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	err = handler.Admit(attributesRecord)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "you may not delete the cluster-admin ClusterRole or ClusterRoleBinding")
+
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	require.NoError(t, handler.Admit(attributesRecord))
 }
