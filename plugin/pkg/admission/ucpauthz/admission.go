@@ -1,6 +1,7 @@
 package ucpauthz
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -17,8 +18,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/apis/rbac"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -28,16 +31,17 @@ import (
 // admin.
 
 const (
-	key               = "key.pem"
-	cert              = "cert.pem"
-	rootCA            = "ca.pem"
-	isFullControlPath = "/api/authz/isfullcontrol"
-	parametersPath    = "/api/authz/parameters"
-	volumeAccessPath  = "/api/authz/volumeaccess"
-	agentPathTemplate = "/api/agent/%s"
-	queryKey          = "user"
-	userAnnotationKey = "com.docker.compose.user"
-	composeUser       = "system:serviceaccount:kube-system:compose"
+	key                 = "key.pem"
+	cert                = "cert.pem"
+	rootCA              = "ca.pem"
+	isFullControlPath   = "/api/authz/isfullcontrol"
+	parametersPath      = "/api/authz/parameters"
+	volumeAccessPath    = "/api/authz/volumeaccess"
+	agentPathTemplate   = "/api/agent/%s"
+	resolveSubjectsPath = "/api/authz/resolve-rbac-subjects"
+	queryKey            = "user"
+	userAnnotationKey   = "com.docker.compose.user"
+	composeUser         = "system:serviceaccount:kube-system:compose"
 )
 
 // These structs are used in the /api/authz/volumeaccess endpoint in UCP.
@@ -185,9 +189,13 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	namespace := attributes.GetNamespace()
 	log.Debugf("the user is: %s", user)
 
+	nameAttr := attributes.GetName()
+	kindAttr := attributes.GetKind()
+	operationAttr := attributes.GetOperation()
+
 	// For stacks, annotate the object with the user that issued this request
 	// to let authorization happen via impersonation.
-	if attributes.GetKind().Kind == "Stack" && attributes.GetOperation() != admission.Delete {
+	if kindAttr.Kind == "Stack" && operationAttr != admission.Delete {
 		stack, ok := attributes.GetObject().(*unstructured.Unstructured)
 		if !ok {
 			return fmt.Errorf("detected object of kind \"Stack\" and type %s but was expecting *unstructured.Unstructured", reflect.TypeOf(attributes.GetObject()).String())
@@ -208,14 +216,21 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	}
 
 	// If a service account is being deleted, also delete the corresponding enzi agent.
-	if attributes.GetKind().Kind == "ServiceAccount" && attributes.GetOperation() == admission.Delete {
-		name := attributes.GetName()
-		return a.deleteAgent(namespace, name)
+	if kindAttr.Kind == "ServiceAccount" && attributes.GetOperation() == admission.Delete {
+		return a.deleteAgent(namespace, nameAttr)
 	}
 
 	// Always admit requests from system components
 	if a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix) {
 		return nil
+	}
+
+	if isCreateOrUpdateRBACBinding(attributes) {
+		return a.resolveRBACBindingSubjects(attributes)
+	}
+
+	if isDeleteClusterAdminClusterRoleOrBinding(attributes) {
+		return admission.NewForbidden(attributes, fmt.Errorf("you may not delete the cluster-admin ClusterRole or ClusterRoleBinding"))
 	}
 
 	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
@@ -234,15 +249,111 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 		allowed, err := a.isFullControl(user, namespace)
 		//allowed, err := a.userHasPermissions(user, params)
 		if err != nil {
-			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has fine-grained permissions \"%s\" for resource %s: %s", user, params.String(), attributes.GetName(), err))
+			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has fine-grained permissions \"%s\" for resource %s: %s", user, params.String(), nameAttr, err))
 		}
 
 		if !allowed {
-			return admission.NewForbidden(attributes, fmt.Errorf("user \"%s\" is not an admin and does not have permissions to use %s for resource %s", user, params.String(), attributes.GetName()))
+			return admission.NewForbidden(attributes, fmt.Errorf("user \"%s\" is not an admin and does not have permissions to use %s for resource %s", user, params.String(), nameAttr))
 		}
 	}
 
 	return nil
+}
+
+var (
+	clusterRoleGroupKind = schema.GroupKind{
+		Group: "rbac.authorization.k8s.io",
+		Kind:  "ClusterRole",
+	}
+	clusterRoleBindingGroupKind = schema.GroupKind{
+		Group: "rbac.authorization.k8s.io",
+		Kind:  "ClusterRoleBinding",
+	}
+	roleBindingGroupKind = schema.GroupKind{
+		Group: "rbac.authorization.k8s.io",
+		Kind:  "RoleBinding",
+	}
+)
+
+// isDeleteClusterAdminClusterRoleOrBinding returns whether the given
+// attributes are for a delete operation on a ClusterRole or ClusterRoleBinding
+// object named "cluster-admin".
+func isDeleteClusterAdminClusterRoleOrBinding(attributes admission.Attributes) bool {
+	nameAttr := attributes.GetName()
+	groupKind := attributes.GetKind().GroupKind()
+	opAttr := attributes.GetOperation()
+
+	return opAttr == admission.Delete && nameAttr == "cluster-admin" && (groupKind == clusterRoleGroupKind || groupKind == clusterRoleBindingGroupKind)
+}
+
+// isCreateOrUpdateRBACBinding returns whether the given attributes are for a
+// create or update operation on a RoleBinding or ClusterRoleBinding object.
+func isCreateOrUpdateRBACBinding(attributes admission.Attributes) bool {
+	groupKind := attributes.GetKind().GroupKind()
+	opAttr := attributes.GetOperation()
+	return (opAttr == admission.Create || opAttr == admission.Update) && (groupKind == clusterRoleBindingGroupKind || groupKind == roleBindingGroupKind)
+}
+
+func (a *ucpAuthz) resolveRBACBindingSubjects(attributes admission.Attributes) error {
+	var subjects *[]rbac.Subject
+	switch object := attributes.GetObject().(type) {
+	case *rbac.RoleBinding:
+		subjects = &object.Subjects
+	case *rbac.ClusterRoleBinding:
+		subjects = &object.Subjects
+	default:
+		return fmt.Errorf("object %T is not a RoleBinding or ClusterRoleBinding", object)
+	}
+
+	u, err := url.Parse(a.ucpLocation)
+	if err != nil {
+		return fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
+	}
+	u.Path = resolveSubjectsPath
+
+	payload, err := json.Marshal(*subjects)
+	if err != nil {
+		return fmt.Errorf("unable to encode subject review payload to JSON: %s", err)
+	}
+
+	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("unable to create delete agent request against %s: %s", u.String(), err)
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("unable to perform request at %s: %s", u.String(), err)
+	}
+	defer resp.Body.Close()
+
+	responseBuf, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("unable to resolve subjects: server responded with status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unable to resolve subjects: server responded with status %d: %s", resp.StatusCode, string(responseBuf))
+	}
+
+	var resolvedResponse kubeResolevRBACSubjectsResponse
+	if err := json.Unmarshal(responseBuf, &resolvedResponse); err != nil {
+		return fmt.Errorf("unable to decode resolved subjects response: %s --- response body: %s", err, string(responseBuf))
+	}
+
+	if len(resolvedResponse.Errors) != 0 {
+		return fmt.Errorf("unable to resolve %d subjects: %q", len(resolvedResponse.Errors), resolvedResponse.Errors)
+	}
+
+	*subjects = resolvedResponse.Subjects
+
+	return nil
+}
+
+// kubeResolevRBACSubjectsResponse is used as the response type in the
+// resolveRBACBindingSubjects API call.
+type kubeResolevRBACSubjectsResponse struct {
+	Subjects []rbac.Subject `json:"subjects"`
+	Errors   []string       `json:"errors"`
 }
 
 // deleteAgent removes an enzi agent when the corresponding kubernetes service
