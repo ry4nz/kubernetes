@@ -19,8 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/admission"
-	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
-	kubeapiserveradmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -86,7 +85,7 @@ type signingPolicy struct {
 	*admission.Handler
 	ucpWebHookURL      string
 	httpClient         *http.Client
-	internalKubeClient internalclientset.Interface
+	internalKubeClient kubernetes.Interface
 	systemUserPrefix   string
 }
 
@@ -100,10 +99,9 @@ func NewSignedImage(httpClient *http.Client, ucpURL string) admission.Interface 
 	}
 }
 
-var _ = kubeapiserveradmission.WantsInternalKubeClientSet(&signingPolicy{})
-
-func (a *signingPolicy) SetInternalKubeClientSet(internalKubeClient internalclientset.Interface) {
-	a.internalKubeClient = internalKubeClient
+// SetExternalKubeClientSet implements the WantsInternalKubeClientSet interface.
+func (p *signingPolicy) SetExternalKubeClientSet(client kubernetes.Interface) {
+	p.internalKubeClient = client
 }
 
 func (a *signingPolicy) ValidateInitialization() error {
