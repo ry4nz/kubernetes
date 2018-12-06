@@ -36,7 +36,7 @@ func TestStackAnnotation(t *testing.T) {
 		userAnnotationKey: "otheruser",
 	})
 
-	err := handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}))
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 
@@ -46,7 +46,7 @@ func TestStackAnnotation(t *testing.T) {
 	stack.SetNamespace("default")
 	stack.SetAnnotations(make(map[string]string))
 
-	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "testuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}))
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 
@@ -58,7 +58,7 @@ func TestStackAnnotation(t *testing.T) {
 		userAnnotationKey: "testuser",
 	})
 
-	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: composeUser}))
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: composeUser}))
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 }
@@ -85,7 +85,7 @@ func TestAdmission(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
 			switch req.URL.Path {
-			case isAdminPath:
+			case isFullControlPath:
 				if req.URL.Query().Get("user") == "" {
 					w.WriteHeader(http.StatusBadRequest)
 					w.Write([]byte("no user query var"))
@@ -134,20 +134,20 @@ func TestAdmission(t *testing.T) {
 		},
 	}
 	// Test1: user is admin, service account is used
-	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Test 2: user is not admin, service account is used
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "notadmin"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}))
 	require.NoError(err)
 
 	// Test 3: user is a system component, service account is used
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "systemprefix:controllermanager"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "systemprefix:controllermanager"}))
 	require.NoError(err)
 
 	// Test 4: user is a system component with the wrong prefix, service
 	// account is used.
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}))
 	require.NoError(err)
 
 	// Test 6: user is not an admin, no service account is used
@@ -157,7 +157,7 @@ func TestAdmission(t *testing.T) {
 			Containers: []api.Container{},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "notadmin"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}))
 	require.NoError(err)
 
 	// Test 7: non-admin user has privileged permissions, no service account is
@@ -176,12 +176,12 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "candoprivileged"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "candoprivileged"}))
 	require.NoError(err)
 
 	// Test 8: non-admin user does not have privileged permissions, no service
 	// account is used, pod uses privileged mode.
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "cannotdoprivileged"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}))
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to use")
 }
@@ -418,16 +418,16 @@ func TestAdmissionServiceAccountDeletion(t *testing.T) {
 
 	sa := api.ServiceAccount{}
 	// Delete a service account and get a 204 from the service agent deletion.
-	err := handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Delete a service account and get a 500 from the service agent deletion.
-	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.Error(err)
 	require.Equal(err.Error(), "failed to delete agent: server responded with status 500: some error")
 
 	// Update a service account and don't expect to hit the service agent
 	// deletion backend.
-	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 }

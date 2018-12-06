@@ -5,7 +5,6 @@ import (
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/apis/extensions"
 )
 
 // GetPodSpecFromObject returns a pointer to the PodSpec in an object that
@@ -24,11 +23,11 @@ func GetPodSpecFromObject(runtimeObject runtime.Object) *api.PodSpec {
 		return &object.Spec.JobTemplate.Spec.Template.Spec
 	case *batch.Job:
 		return &object.Spec.Template.Spec
-	case *extensions.DaemonSet:
+	case *apps.DaemonSet:
 		return &object.Spec.Template.Spec
-	case *extensions.Deployment:
+	case *apps.Deployment:
 		return &object.Spec.Template.Spec
-	case *extensions.ReplicaSet:
+	case *apps.ReplicaSet:
 		return &object.Spec.Template.Spec
 	default:
 		return nil

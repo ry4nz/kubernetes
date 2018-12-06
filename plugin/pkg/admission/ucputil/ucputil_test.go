@@ -9,7 +9,6 @@ import (
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/apis/extensions"
 )
 
 // TestGetPodSpecFromObject ensures that GetPodSpecFromObject returns non-nil
@@ -22,9 +21,9 @@ func TestGetPodSpecFromObject(t *testing.T) {
 		&apps.StatefulSet{},
 		&batch.CronJob{},
 		&batch.Job{},
-		&extensions.DaemonSet{},
-		&extensions.Deployment{},
-		&extensions.ReplicaSet{},
+		&apps.DaemonSet{},
+		&apps.Deployment{},
+		&apps.ReplicaSet{},
 	}
 	for _, o := range objects {
 		assert.NotNil(t, GetPodSpecFromObject(o), "Object type: %T\n", o)

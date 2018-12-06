@@ -14,7 +14,6 @@ import (
 	"k8s.io/kubernetes/pkg/apis/apps"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/apis/extensions"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -85,9 +84,9 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 			&apps.StatefulSet{Spec: apps.StatefulSetSpec{Template: podTemplateSpec}},
 			&batch.CronJob{Spec: batch.CronJobSpec{JobTemplate: batch.JobTemplateSpec{Spec: jobSpec}}},
 			&batch.Job{Spec: jobSpec},
-			&extensions.DaemonSet{Spec: extensions.DaemonSetSpec{Template: podTemplateSpec}},
-			&extensions.Deployment{Spec: extensions.DeploymentSpec{Template: podTemplateSpec}},
-			&extensions.ReplicaSet{Spec: extensions.ReplicaSetSpec{Template: podTemplateSpec}},
+			&apps.DaemonSet{Spec: apps.DaemonSetSpec{Template: podTemplateSpec}},
+			&apps.Deployment{Spec: apps.DeploymentSpec{Template: podTemplateSpec}},
+			&apps.ReplicaSet{Spec: apps.ReplicaSetSpec{Template: podTemplateSpec}},
 		}
 		for _, operation := range []admission.Operation{admission.Create, admission.Update} {
 			for _, object := range objects {
@@ -95,7 +94,7 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 				kind := schema.GroupVersionKind{}
 				resource := schema.GroupVersionResource{}
 				user := &user.DefaultInfo{Name: c.user}
-				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, c.namespace, "name", resource, "", operation, user))
+				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, c.namespace, "name", resource, "", operation, false, user))
 				require.NoError(err, "Object type: %T\n", o)
 
 				expected := c.expectedTolerations
