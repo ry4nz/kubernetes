@@ -60,7 +60,7 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
+	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "alice"}))
 	assert.NoError(t, err)
 	assert.Equal(t, "signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5", pod.Spec.InitContainers[0].Image)
 
@@ -72,7 +72,7 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "alice"}))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error fixture")
 
@@ -84,7 +84,7 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "alice"}))
 	assert.NoError(t, err)
 	assert.Equal(t, "signed@sha256:b507b3e73a633c62f72a0daf0cbf49bb2632e7bbae0926eb26c9006ba982fcd5", pod.Spec.Containers[0].Image)
 
@@ -96,7 +96,7 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "alice"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "alice"}))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error fixture")
 }
