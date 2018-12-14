@@ -23,5 +23,8 @@ all: push
 build:
 	docker build --pull -t staging-k8s.gcr.io/$(IMAGE):$(TAG) .
 
+retag:
+	docker tag staging-k8s.gcr.io/$(IMAGE):$(TAG) k8s.gcr.io/$(IMAGE):$(TAG)
+
 push: build
 	docker push staging-k8s.gcr.io/$(IMAGE):$(TAG)
