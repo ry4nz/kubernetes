@@ -24,6 +24,12 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
+			switch req.URL.Query().Get("serviceaccount") {
+			case "system:serviceaccount:other-namespace:allow-schedule-service-account":
+				w.WriteHeader(200)
+				w.Write([]byte("true"))
+				return
+			}
 			switch req.URL.Query().Get("user") {
 			case "":
 				w.WriteHeader(http.StatusBadRequest)
@@ -62,14 +68,18 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 	cases := []struct {
 		namespace           string
 		user                string
+		serviceAccount      string
 		initialTolerations  []api.Toleration
 		expectedTolerations []api.Toleration
 	}{
-		{"kube-system", "system", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{orchestratorToleration, systemToleration, userToleration}},
-		{"kube-system", "system", []api.Toleration{orchestratorToleration}, []api.Toleration{orchestratorToleration, systemToleration}},
-		{"kube-system", "system", []api.Toleration{sameKeyAsSystemToleration, userToleration}, []api.Toleration{orchestratorToleration, systemToleration, userToleration}},
-		{"other-namespace", "allow-schedule", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration, systemToleration}},
-		{"other-namespace", "disallow-schedule", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration}},
+		{"kube-system", "system", "", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{orchestratorToleration, systemToleration, userToleration}},
+		{"kube-system", "system", "", []api.Toleration{orchestratorToleration}, []api.Toleration{orchestratorToleration, systemToleration}},
+		{"kube-system", "system", "", []api.Toleration{sameKeyAsSystemToleration, userToleration}, []api.Toleration{orchestratorToleration, systemToleration, userToleration}},
+		{"kube-system", "system:serviceaccount:kube-system:deployment-controller", "", []api.Toleration{sameKeyAsSystemToleration, userToleration}, []api.Toleration{orchestratorToleration, systemToleration, userToleration}},
+		{"other-namespace", "allow-schedule", "", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration, systemToleration}},
+		{"other-namespace", "disallow-schedule", "", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration}},
+		{"other-namespace", "disallow-schedule", "allow-schedule-service-account", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration, systemToleration}},
+		{"other-namespace", "disallow-schedule", "disallow-schedule-service-account", []api.Toleration{orchestratorToleration, sameKeyAsOrchestratorToleration, userToleration}, []api.Toleration{userToleration}},
 	}
 
 	for _, c := range cases {
@@ -91,6 +101,7 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 		for _, operation := range []admission.Operation{admission.Create, admission.Update} {
 			for _, object := range objects {
 				o := object.DeepCopyObject()
+				ucputil.GetPodSpecFromObject(o).ServiceAccountName = c.serviceAccount
 				kind := schema.GroupVersionKind{}
 				resource := schema.GroupVersionResource{}
 				user := &user.DefaultInfo{Name: c.user}

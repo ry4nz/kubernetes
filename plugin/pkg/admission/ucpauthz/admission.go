@@ -23,6 +23,7 @@ import (
 	"k8s.io/apiserver/pkg/admission"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/rbac"
+	"k8s.io/kubernetes/pkg/serviceaccount"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -242,6 +243,12 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 		return nil
 	}
 
+	serviceAccountName := "default"
+	if len(podSpec.ServiceAccountName) > 0 {
+		serviceAccountName = podSpec.ServiceAccountName
+	}
+	serviceAccountUsername := serviceaccount.UserInfo(namespace, serviceAccountName, "").GetName()
+
 	if attributes.GetOperation() == admission.Delete {
 		return nil
 	}
@@ -249,7 +256,7 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	// Inspect the podSpec for low-level request parameters
 	params := ParamsFromPodSpec(podSpec)
 	if params.HasRestrictedParameters() {
-		allowed, err := a.isFullControl(user, namespace)
+		allowed, err := a.isFullControl(user, namespace, serviceAccountUsername)
 		//allowed, err := a.userHasPermissions(user, params)
 		if err != nil {
 			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has fine-grained permissions \"%s\" for resource %s: %s", user, params.String(), nameAttr, err))
@@ -434,7 +441,7 @@ func (a *ucpAuthz) userHasPermissions(username string, params *authzParameters) 
 	}
 }
 
-func (a *ucpAuthz) isFullControl(username, namespace string) (bool, error) {
+func (a *ucpAuthz) isFullControl(username, namespace, serviceAccountUsername string) (bool, error) {
 	u, err := url.Parse(a.ucpLocation)
 	if err != nil {
 		return false, fmt.Errorf("unable to parse UCP location \"%s\": %s", a.ucpLocation, err)
@@ -443,22 +450,25 @@ func (a *ucpAuthz) isFullControl(username, namespace string) (bool, error) {
 	q := u.Query()
 	q.Set("user", username)
 	q.Set("namespace", namespace)
+	if serviceAccountUsername != "" {
+		q.Set("serviceaccount", serviceAccountUsername)
+	}
 	u.RawQuery = q.Encode()
 
 	resp, err := a.httpClient.Get(u.String())
 	if err != nil {
-		return false, fmt.Errorf("unable to lookup user \"%s\" at %s: %s", username, u.String(), err)
+		return false, fmt.Errorf("unable to lookup user \"%s\" or service account \"%s\" at %s: %s", username, serviceAccountUsername, u.String(), err)
 	}
 
 	defer resp.Body.Close()
 	msg, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return false, fmt.Errorf("unable to verify if user %s has full control privileges at %s: received status code %d but unable to read response message: %s", username, u.String(), resp.StatusCode, err)
+		return false, fmt.Errorf("unable to verify if user %s or service account %s has full control privileges at %s: received status code %d but unable to read response message: %s", username, serviceAccountUsername, u.String(), resp.StatusCode, err)
 	}
 	msgStr := strings.TrimSpace(string(msg))
 
 	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("unable to verify if user %s has full control privileges at %s: received status code %d: %s", username, u.String(), resp.StatusCode, msgStr)
+		return false, fmt.Errorf("unable to verify if user %s or service account %s has full control privileges at %s: received status code %d: %s", username, serviceAccountUsername, u.String(), resp.StatusCode, msgStr)
 	}
 
 	switch msgStr {
@@ -467,7 +477,7 @@ func (a *ucpAuthz) isFullControl(username, namespace string) (bool, error) {
 	case "false":
 		return false, nil
 	default:
-		return false, fmt.Errorf("unknown response \"%s\" while verifying if user %s is an admin", msgStr, username)
+		return false, fmt.Errorf("unknown response \"%s\" while verifying if user %s or service account %s have full control", msgStr, username, serviceAccountUsername)
 	}
 }
 
@@ -479,7 +489,7 @@ func (a *ucpAuthz) checkPersistentVolumeCreateOrUpdate(username, namespace strin
 	// Only full control users may create local or hostpath PVs to prevent
 	// users from bind mounting UCP data.
 	if pv.Spec.Local != nil || pv.Spec.HostPath != nil {
-		allowed, err := a.isFullControl(username, namespace)
+		allowed, err := a.isFullControl(username, namespace, "")
 		//allowed, err := a.userHasPermissions(user, params)
 		if err != nil {
 			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has permissions to create local PersistentVolumes: %s", username, err))
