@@ -17,6 +17,7 @@ import (
 	authUser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/serviceaccount"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -64,6 +65,24 @@ var systemUsers = []string{
 	authUser.KubeProxy,
 	authUser.KubeControllerManager,
 	authUser.KubeScheduler,
+}
+
+func isSystemUser(user string) bool {
+	for _, systemUser := range systemUsers {
+		if user == systemUser {
+			return true
+		}
+	}
+	// We also want to special-case service accounts with a name like
+	// system:serviceaccount:kube-system:deployment-controller.
+	// These are service accounts that the Kube controller manager uses
+	// when --use-service-account-credentials is specified. See
+	// https://github.com/kubernetes/kubernetes/blob/master/cmd/kube-controller-manager/app/apps.go
+	// for the source of these service accounts.
+	// Since these service accounts are in the protected kube-system
+	// namespace, there should be no danger of non-admin users creating
+	// fake versions of these accounts.
+	return strings.HasPrefix(user, "system:serviceaccount:kube-system") && strings.HasSuffix(user, "-controller")
 }
 
 // Register registers a plugin
@@ -157,20 +176,19 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
 	} else {
 		user := attributes.GetUserInfo().GetName()
 		hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
-		isSystemUser := false
-		for _, systemUser := range systemUsers {
-			if user == systemUser {
-				isSystemUser = true
-				break
-			}
-		}
 
-		if hasSystemPrefix || isSystemUser {
+		if hasSystemPrefix || isSystemUser(user) {
 			// If this is a system pod, do not modify it.
 			return nil
 		}
 
-		allowsManagerScheduling, err := a.allowsManagerScheduling(user)
+		serviceAccountName := "default"
+		if len(podSpec.ServiceAccountName) > 0 {
+			serviceAccountName = podSpec.ServiceAccountName
+		}
+		serviceAccountUsername := serviceaccount.UserInfo(attributes.GetNamespace(), serviceAccountName, "").GetName()
+
+		allowsManagerScheduling, err := a.allowsManagerScheduling(user, serviceAccountUsername)
 		if err != nil {
 			return apierrors.NewInternalError(err)
 		}
@@ -198,7 +216,7 @@ func NewUCPNodeSelector(httpClient *http.Client) admission.Interface {
 
 // allowsManagerScheduling takes a username and returns if the user is allowed
 // to schedule pods on a manager/DTR node.
-func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error) {
+func (a *ucpNodeSelector) allowsManagerScheduling(username, serviceAccountUsername string) (bool, error) {
 	u, err := url.Parse(a.ucpLocation)
 	if err != nil {
 		return false, fmt.Errorf("unable to parse UCP location %q: %s", a.ucpLocation, err)
@@ -206,6 +224,9 @@ func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error)
 	u.Path = apiPath
 	q := u.Query()
 	q.Set("user", username)
+	if serviceAccountUsername != "" {
+		q.Set("serviceaccount", serviceAccountUsername)
+	}
 	u.RawQuery = q.Encode()
 
 	resp, err := a.httpClient.Get(u.String())
