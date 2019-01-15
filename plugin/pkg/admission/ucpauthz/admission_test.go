@@ -22,6 +22,14 @@ type response struct {
 	body       string
 }
 
+type testControllerServer struct {
+	nsIdx           int
+	paramsIdx       int
+	nsResponses     []response
+	paramsResponses []response
+	testServer      *httptest.Server
+}
+
 func TestStackAnnotation(t *testing.T) {
 	require := require.New(t)
 
@@ -81,36 +89,7 @@ func TestAdmission(t *testing.T) {
 		{200, "true"},
 		{200, "false"},
 	}
-	nsIdx := 0
-	paramsIdx := 0
-	ts := httptest.NewServer(http.HandlerFunc(
-		func(w http.ResponseWriter, req *http.Request) {
-			switch req.URL.Path {
-			case isFullControlPath:
-				if req.URL.Query().Get("user") == "" {
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("no user query var"))
-					return
-				}
-				w.WriteHeader(nsResponses[nsIdx].statuscode)
-				w.Write([]byte(nsResponses[nsIdx].body))
-				nsIdx++
-			case parametersPath:
-				if req.URL.Query().Get("user") == "" {
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("no user query var"))
-					return
-				}
-				if req.URL.Query().Get("params") == "" {
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("no user query var"))
-					return
-				}
-				w.WriteHeader(paramsResponses[paramsIdx].statuscode)
-				w.Write([]byte(paramsResponses[paramsIdx].body))
-				paramsIdx++
-			}
-		}))
+	testControllerServer := getTestControllerServer(nsResponses, paramsResponses)
 
 	pod := api.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
@@ -122,7 +101,7 @@ func TestAdmission(t *testing.T) {
 
 	handler := &ucpAuthz{
 		Handler:      admission.NewHandler(admission.Create, admission.Update),
-		ucpLocation:  ts.URL,
+		ucpLocation:  testControllerServer.testServer.URL,
 		systemPrefix: "systemprefix:",
 		httpClient: &http.Client{
 			Transport: &http.Transport{
@@ -453,4 +432,134 @@ func TestCannotDeleteClusterAdminClusterRoleOrBinding(t *testing.T) {
 
 	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
 	require.NoError(t, handler.Admit(attributesRecord))
+}
+func TestPersistentVolumeLocalCreate(t *testing.T) {
+	require := require.New(t)
+	namespace := "test"
+	nsResponses := []response{
+		{200, "true"},
+		{200, "true"},
+		{200, "false"},
+		{200, "false"},
+		{200, "false"},
+	}
+	paramsResponses := []response{}
+	testControllerServer := getTestControllerServer(nsResponses, paramsResponses)
+
+	nonLocalPV := api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
+		Spec: api.PersistentVolumeSpec{
+			PersistentVolumeSource: api.PersistentVolumeSource{
+				NFS: &api.NFSVolumeSource{
+					Server: "foobar",
+				},
+			},
+		},
+	}
+	localPV := api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
+		Spec: api.PersistentVolumeSpec{
+			PersistentVolumeSource: api.PersistentVolumeSource{
+				Local: &api.LocalVolumeSource{
+					Path: "/foobar",
+				},
+			},
+		},
+	}
+	hostPathPV := api.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{Name: "123", Namespace: namespace},
+		Spec: api.PersistentVolumeSpec{
+			PersistentVolumeSource: api.PersistentVolumeSource{
+				HostPath: &api.HostPathVolumeSource{
+					Path: "/foobar",
+				},
+			},
+		},
+	}
+
+	handler := &ucpAuthz{
+		Handler:      admission.NewHandler(admission.Create, admission.Update, admission.Delete),
+		ucpLocation:  testControllerServer.testServer.URL,
+		systemPrefix: "systemprefix:",
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: nil,
+				// The default is 2 which is too small. We may need to
+				// adjust this value as we get results from load/stress
+				// tests.
+				MaxIdleConnsPerHost: 5,
+			},
+		},
+	}
+	// Test1: user is admin, local PV is created
+	err := handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	require.NoError(err)
+
+	// Test 2: user is admin, host path PV is created
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	require.NoError(err)
+
+	// Test 3: user is admin, non-local PV is created
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	require.NoError(err)
+
+	// Test 4: user is non-admin, non-local PV is created
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	require.NoError(err)
+
+	// Test 5: user is non-admin, local PV is blocked
+	err = handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	require.Error(err)
+	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
+
+	// Test 6: user is non-admin, host path PV is blocked
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	require.Error(err)
+	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
+
+	// Test 7: user is non-admin, host path PV is blocked for update
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "nonadminuser"}))
+	require.Error(err)
+	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
+
+	// Test 8: user is non-admin, host path PV deletion is allowed
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "nonadminuser"}))
+	require.NoError(err)
+}
+
+func getTestControllerServer(nsResponses, paramsResponses []response) *testControllerServer {
+	ret := &testControllerServer{
+		nsResponses:     nsResponses,
+		paramsResponses: paramsResponses,
+	}
+	ts := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, req *http.Request) {
+			switch req.URL.Path {
+			case isFullControlPath:
+				if req.URL.Query().Get("user") == "" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte("no user query var"))
+					return
+				}
+				w.WriteHeader(ret.nsResponses[ret.nsIdx].statuscode)
+				w.Write([]byte(ret.nsResponses[ret.nsIdx].body))
+				ret.nsIdx++
+			case parametersPath:
+				if req.URL.Query().Get("user") == "" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte("no user query var"))
+					return
+				}
+				if req.URL.Query().Get("params") == "" {
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte("no user query var"))
+					return
+				}
+				w.WriteHeader(ret.paramsResponses[ret.paramsIdx].statuscode)
+				w.Write([]byte(ret.paramsResponses[ret.paramsIdx].body))
+				ret.paramsIdx++
+			}
+		}))
+	ret.testServer = ts
+	return ret
 }

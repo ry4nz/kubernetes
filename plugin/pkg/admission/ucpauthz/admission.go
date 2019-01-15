@@ -18,6 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
 	api "k8s.io/kubernetes/pkg/apis/core"
@@ -26,9 +27,7 @@ import (
 )
 
 // The UCPAuthorization admission controller rejects requests based on the
-// contents of a podspec. Specifically:
-// 1. Requests using a ServiceAccount will be rejected if the user is not an
-// admin.
+// contents of a podspec.
 
 const (
 	key                 = "key.pem"
@@ -231,6 +230,10 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 
 	if isDeleteClusterAdminClusterRoleOrBinding(attributes) {
 		return admission.NewForbidden(attributes, fmt.Errorf("you may not delete the cluster-admin ClusterRole or ClusterRoleBinding"))
+	}
+
+	if kindAttr.Kind == "PersistentVolume" && (attributes.GetOperation() == admission.Create || attributes.GetOperation() == admission.Update) {
+		return a.checkPersistentVolumeCreateOrUpdate(user, namespace, attributes.GetObject())
 	}
 
 	podSpec := ucputil.GetPodSpecFromObject(attributes.GetObject())
@@ -466,6 +469,27 @@ func (a *ucpAuthz) isFullControl(username, namespace string) (bool, error) {
 	default:
 		return false, fmt.Errorf("unknown response \"%s\" while verifying if user %s is an admin", msgStr, username)
 	}
+}
+
+func (a *ucpAuthz) checkPersistentVolumeCreateOrUpdate(username, namespace string, obj runtime.Object) error {
+	pv, ok := obj.(*api.PersistentVolume)
+	if !ok {
+		return fmt.Errorf("detected object of kind \"PersistentVolume\" and type %s but was expecting *api.PersistentVolume", reflect.TypeOf(obj).String())
+	}
+	// Only full control users may create local or hostpath PVs to prevent
+	// users from bind mounting UCP data.
+	if pv.Spec.Local != nil || pv.Spec.HostPath != nil {
+		allowed, err := a.isFullControl(username, namespace)
+		//allowed, err := a.userHasPermissions(user, params)
+		if err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("unable to determine if user \"%s\" has permissions to create local PersistentVolumes: %s", username, err))
+		}
+
+		if !allowed {
+			return apierrors.NewInternalError(fmt.Errorf("user \"%s\" is not an admin and does not have permissions to create local PersistentVolumes", username))
+		}
+	}
+	return nil
 }
 
 // NewUCPAuthz returns a signing policy handler
