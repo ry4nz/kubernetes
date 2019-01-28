@@ -14,7 +14,6 @@ import (
 	"github.com/docker/go-connections/tlsconfig"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/admission"
-	authUser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/serviceaccount"
@@ -59,31 +58,6 @@ var (
 const (
 	PluginName = "UCPNodeSelector"
 )
-
-var systemUsers = []string{
-	authUser.APIServerUser,
-	authUser.KubeProxy,
-	authUser.KubeControllerManager,
-	authUser.KubeScheduler,
-}
-
-func isSystemUser(user string) bool {
-	for _, systemUser := range systemUsers {
-		if user == systemUser {
-			return true
-		}
-	}
-	// We also want to special-case service accounts with a name like
-	// system:serviceaccount:kube-system:deployment-controller.
-	// These are service accounts that the Kube controller manager uses
-	// when --use-service-account-credentials is specified. See
-	// https://github.com/kubernetes/kubernetes/blob/master/cmd/kube-controller-manager/app/apps.go
-	// for the source of these service accounts.
-	// Since these service accounts are in the protected kube-system
-	// namespace, there should be no danger of non-admin users creating
-	// fake versions of these accounts.
-	return strings.HasPrefix(user, "system:serviceaccount:kube-system") && strings.HasSuffix(user, "-controller")
-}
 
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
@@ -177,7 +151,7 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
 		user := attributes.GetUserInfo().GetName()
 		hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
 
-		if hasSystemPrefix || isSystemUser(user) {
+		if hasSystemPrefix || ucputil.IsSystemUser(user) {
 			// If this is a system pod, do not modify it.
 			return nil
 		}

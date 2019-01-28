@@ -221,7 +221,8 @@ func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
 	}
 
 	// Always admit requests from system components
-	if a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix) {
+	hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
+	if hasSystemPrefix || ucputil.IsSystemUser(user) {
 		return nil
 	}
 
@@ -313,6 +314,19 @@ func (a *ucpAuthz) resolveRBACBindingSubjects(attributes admission.Attributes) e
 		subjects = &object.Subjects
 	default:
 		return fmt.Errorf("object %T is not a RoleBinding or ClusterRoleBinding", object)
+	}
+
+	isAllServiceAccounts := true
+	for _, subject := range *subjects {
+		if subject.Kind != rbac.ServiceAccountKind {
+			isAllServiceAccounts = false
+			break
+		}
+	}
+	// There's no need to resolve subjects if they're all service accounts,
+	// because service account resolution is a no-op.
+	if isAllServiceAccounts {
+		return nil
 	}
 
 	u, err := url.Parse(a.ucpLocation)
