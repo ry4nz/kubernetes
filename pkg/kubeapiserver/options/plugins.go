@@ -47,10 +47,13 @@ import (
 	"k8s.io/kubernetes/plugin/pkg/admission/security/podsecuritypolicy"
 	"k8s.io/kubernetes/plugin/pkg/admission/securitycontext/scdeny"
 	"k8s.io/kubernetes/plugin/pkg/admission/serviceaccount"
+	"k8s.io/kubernetes/plugin/pkg/admission/signingpolicy"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/label"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/persistentvolume/resize"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageclass/setdefault"
 	"k8s.io/kubernetes/plugin/pkg/admission/storage/storageobjectinuseprotection"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucpauthz"
+	"k8s.io/kubernetes/plugin/pkg/admission/ucpnodeselector"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/admission"
@@ -87,6 +90,7 @@ var AllOrderedPlugins = []string{
 	extendedresourcetoleration.PluginName,   // ExtendedResourceToleration
 	label.PluginName,                        // PersistentVolumeLabel
 	setdefault.PluginName,                   // DefaultStorageClass
+	signingpolicy.PluginName,                // CheckImageSigning
 	storageobjectinuseprotection.PluginName, // StorageObjectInUseProtection
 	gc.PluginName,                           // OwnerReferencesPermissionEnforcement
 	resize.PluginName,                       // PersistentVolumeClaimResize
@@ -94,6 +98,8 @@ var AllOrderedPlugins = []string{
 	validatingwebhook.PluginName,            // ValidatingAdmissionWebhook
 	resourcequota.PluginName,                // ResourceQuota
 	deny.PluginName,                         // AlwaysDeny
+	ucpauthz.PluginName,                     // UCPAuthorization
+	ucpnodeselector.PluginName,              // UCPNodeSelector
 }
 
 // RegisterAllAdmissionPlugins registers all admission plugins and
@@ -124,8 +130,11 @@ func RegisterAllAdmissionPlugins(plugins *admission.Plugins) {
 	scdeny.Register(plugins)
 	serviceaccount.Register(plugins)
 	setdefault.Register(plugins)
+	signingpolicy.Register(plugins)
 	resize.Register(plugins)
 	storageobjectinuseprotection.Register(plugins)
+	ucpauthz.Register(plugins)
+	ucpnodeselector.Register(plugins)
 }
 
 // DefaultOffAdmissionPlugins get admission plugins off by default for kube-apiserver.
@@ -140,6 +149,9 @@ func DefaultOffAdmissionPlugins() sets.String {
 		mutatingwebhook.PluginName,          //MutatingAdmissionWebhook
 		validatingwebhook.PluginName,        //ValidatingAdmissionWebhook
 		resourcequota.PluginName,            //ResourceQuota
+		signingpolicy.PluginName,            // CheckImageSigning
+		ucpauthz.PluginName,                 // UCPAuthorization
+		ucpnodeselector.PluginName,          // UCPNodeSelector
 	)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
