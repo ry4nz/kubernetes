@@ -84,6 +84,8 @@ func TestAdmission(t *testing.T) {
 		// Params requests
 		{200, "true"},
 		{200, "false"},
+
+		{200, "true"},
 	}
 	paramsResponses := []response{
 		{200, "true"},
@@ -164,6 +166,12 @@ func TestAdmission(t *testing.T) {
 	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}))
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to use")
+
+	// Test 9: non-admin user does not have privileged permissions but
+	// the pod's service account does.
+	pod.Spec.ServiceAccountName = "foobar"
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}))
+	require.NoError(err)
 }
 
 // TestParameterString tests the String() serialization method of
@@ -417,20 +425,20 @@ func TestCannotDeleteClusterAdminClusterRoleOrBinding(t *testing.T) {
 		Handler: admission.NewHandler(admission.Delete),
 	}
 
-	attributesRecord := admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	attributesRecord := admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"})
 	err := handler.Admit(attributesRecord)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "you may not delete the cluster-admin ClusterRole or ClusterRoleBinding")
 
-	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterroles").WithVersion("v1"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"})
 	require.NoError(t, handler.Admit(attributesRecord))
 
-	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "cluster-admin", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"})
 	err = handler.Admit(attributesRecord)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "you may not delete the cluster-admin ClusterRole or ClusterRoleBinding")
 
-	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, &user.DefaultInfo{Name: "adminuser"})
+	attributesRecord = admission.NewAttributesRecord(nil, nil, clusterRoleBindingGroupKind.WithVersion("v1"), "", "something-else", rbac.Resource("clusterrolebindingss").WithVersion("v1"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"})
 	require.NoError(t, handler.Admit(attributesRecord))
 }
 func TestPersistentVolumeLocalCreate(t *testing.T) {
@@ -492,38 +500,38 @@ func TestPersistentVolumeLocalCreate(t *testing.T) {
 		},
 	}
 	// Test1: user is admin, local PV is created
-	err := handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Test 2: user is admin, host path PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Test 3: user is admin, non-local PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
 	require.NoError(err)
 
 	// Test 4: user is non-admin, non-local PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
 	require.NoError(err)
 
 	// Test 5: user is non-admin, local PV is blocked
-	err = handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
 	// Test 6: user is non-admin, host path PV is blocked
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
 	// Test 7: user is non-admin, host path PV is blocked for update
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Update, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "nonadminuser"}))
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
 	// Test 8: user is non-admin, host path PV deletion is allowed
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Delete, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "nonadminuser"}))
 	require.NoError(err)
 }
 

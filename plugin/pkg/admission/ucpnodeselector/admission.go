@@ -14,9 +14,9 @@ import (
 	"github.com/docker/go-connections/tlsconfig"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apiserver/pkg/admission"
-	authUser "k8s.io/apiserver/pkg/authentication/user"
 	"k8s.io/kubernetes/pkg/apis/batch"
 	api "k8s.io/kubernetes/pkg/apis/core"
+	"k8s.io/kubernetes/pkg/serviceaccount"
 	"k8s.io/kubernetes/plugin/pkg/admission/ucputil"
 )
 
@@ -58,13 +58,6 @@ var (
 const (
 	PluginName = "UCPNodeSelector"
 )
-
-var systemUsers = []string{
-	authUser.APIServerUser,
-	authUser.KubeProxy,
-	authUser.KubeControllerManager,
-	authUser.KubeScheduler,
-}
 
 // Register registers a plugin
 func Register(plugins *admission.Plugins) {
@@ -157,20 +150,19 @@ func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
 	} else {
 		user := attributes.GetUserInfo().GetName()
 		hasSystemPrefix := a.systemPrefix != "" && strings.HasPrefix(user, a.systemPrefix)
-		isSystemUser := false
-		for _, systemUser := range systemUsers {
-			if user == systemUser {
-				isSystemUser = true
-				break
-			}
-		}
 
-		if hasSystemPrefix || isSystemUser {
+		if hasSystemPrefix || ucputil.IsSystemUser(user) {
 			// If this is a system pod, do not modify it.
 			return nil
 		}
 
-		allowsManagerScheduling, err := a.allowsManagerScheduling(user)
+		serviceAccountName := "default"
+		if len(podSpec.ServiceAccountName) > 0 {
+			serviceAccountName = podSpec.ServiceAccountName
+		}
+		serviceAccountUsername := serviceaccount.UserInfo(attributes.GetNamespace(), serviceAccountName, "").GetName()
+
+		allowsManagerScheduling, err := a.allowsManagerScheduling(user, serviceAccountUsername)
 		if err != nil {
 			return apierrors.NewInternalError(err)
 		}
@@ -198,7 +190,7 @@ func NewUCPNodeSelector(httpClient *http.Client) admission.Interface {
 
 // allowsManagerScheduling takes a username and returns if the user is allowed
 // to schedule pods on a manager/DTR node.
-func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error) {
+func (a *ucpNodeSelector) allowsManagerScheduling(username, serviceAccountUsername string) (bool, error) {
 	u, err := url.Parse(a.ucpLocation)
 	if err != nil {
 		return false, fmt.Errorf("unable to parse UCP location %q: %s", a.ucpLocation, err)
@@ -206,6 +198,9 @@ func (a *ucpNodeSelector) allowsManagerScheduling(username string) (bool, error)
 	u.Path = apiPath
 	q := u.Query()
 	q.Set("user", username)
+	if serviceAccountUsername != "" {
+		q.Set("serviceaccount", serviceAccountUsername)
+	}
 	u.RawQuery = q.Encode()
 
 	resp, err := a.httpClient.Get(u.String())
