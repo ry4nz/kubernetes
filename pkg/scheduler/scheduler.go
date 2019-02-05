@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -140,6 +140,9 @@ type Config struct {
 
 	// Disable pod preemption or not.
 	DisablePreemption bool
+
+	// SchedulingQueue holds pods to be scheduled
+	SchedulingQueue core.SchedulingQueue
 }
 
 // NewFromConfigurator returns a new scheduler that is created entirely by the Configurator.  Assumes Create() is implemented.
@@ -196,10 +199,11 @@ func (sched *Scheduler) schedule(pod *v1.Pod) (string, error) {
 		sched.config.Error(pod, err)
 		sched.config.Recorder.Eventf(pod, v1.EventTypeWarning, "FailedScheduling", "%v", err)
 		sched.config.PodConditionUpdater.Update(pod, &v1.PodCondition{
-			Type:    v1.PodScheduled,
-			Status:  v1.ConditionFalse,
-			Reason:  v1.PodReasonUnschedulable,
-			Message: err.Error(),
+			Type:          v1.PodScheduled,
+			Status:        v1.ConditionFalse,
+			LastProbeTime: metav1.Now(),
+			Reason:        v1.PodReasonUnschedulable,
+			Message:       err.Error(),
 		})
 		return "", err
 	}
@@ -230,11 +234,19 @@ func (sched *Scheduler) preempt(preemptor *v1.Pod, scheduleErr error) (string, e
 	var nodeName = ""
 	if node != nil {
 		nodeName = node.Name
+		// Update the scheduling queue with the nominated pod information. Without
+		// this, there would be a race condition between the next scheduling cycle
+		// and the time the scheduler receives a Pod Update for the nominated pod.
+		sched.config.SchedulingQueue.UpdateNominatedPodForNode(preemptor, nodeName)
+
+		// Make a call to update nominated node name of the pod on the API server.
 		err = sched.config.PodPreemptor.SetNominatedNodeName(preemptor, nodeName)
 		if err != nil {
 			glog.Errorf("Error in preemption process. Cannot update pod %v annotations: %v", preemptor.Name, err)
+			sched.config.SchedulingQueue.DeleteNominatedPodIfExists(preemptor)
 			return "", err
 		}
+
 		for _, victim := range victims {
 			if err := sched.config.PodPreemptor.DeletePod(victim); err != nil {
 				glog.Errorf("Error preempting pod %v/%v: %v", victim.Namespace, victim.Name, err)
@@ -272,10 +284,11 @@ func (sched *Scheduler) assumeAndBindVolumes(assumed *v1.Pod, host string) error
 			sched.config.Error(assumed, err)
 			sched.config.Recorder.Eventf(assumed, v1.EventTypeWarning, "FailedScheduling", "AssumePodVolumes failed: %v", err)
 			sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
-				Type:    v1.PodScheduled,
-				Status:  v1.ConditionFalse,
-				Reason:  "SchedulerError",
-				Message: err.Error(),
+				Type:          v1.PodScheduled,
+				Status:        v1.ConditionFalse,
+				LastProbeTime: metav1.Now(),
+				Reason:        "SchedulerError",
+				Message:       err.Error(),
 			})
 			return err
 		}
@@ -295,9 +308,10 @@ func (sched *Scheduler) assumeAndBindVolumes(assumed *v1.Pod, host string) error
 				sched.config.Error(assumed, err)
 				sched.config.Recorder.Eventf(assumed, v1.EventTypeNormal, "FailedScheduling", "%v", err)
 				sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionFalse,
-					Reason: "VolumeBindingWaiting",
+					Type:          v1.PodScheduled,
+					Status:        v1.ConditionFalse,
+					LastProbeTime: metav1.Now(),
+					Reason:        "VolumeBindingWaiting",
 				})
 			}
 			return err
@@ -350,9 +364,10 @@ func (sched *Scheduler) bindVolumesWorker() {
 		sched.config.Error(assumed, err)
 		sched.config.Recorder.Eventf(assumed, eventType, "FailedScheduling", "%v", err)
 		sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
-			Type:   v1.PodScheduled,
-			Status: v1.ConditionFalse,
-			Reason: reason,
+			Type:          v1.PodScheduled,
+			Status:        v1.ConditionFalse,
+			LastProbeTime: metav1.Now(),
+			Reason:        reason,
 		})
 		return false
 	}
@@ -387,12 +402,17 @@ func (sched *Scheduler) assume(assumed *v1.Pod, host string) error {
 		sched.config.Error(assumed, err)
 		sched.config.Recorder.Eventf(assumed, v1.EventTypeWarning, "FailedScheduling", "AssumePod failed: %v", err)
 		sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
-			Type:    v1.PodScheduled,
-			Status:  v1.ConditionFalse,
-			Reason:  "SchedulerError",
-			Message: err.Error(),
+			Type:          v1.PodScheduled,
+			Status:        v1.ConditionFalse,
+			Reason:        "SchedulerError",
+			LastProbeTime: metav1.Now(),
+			Message:       err.Error(),
 		})
 		return err
+	}
+	// if "assumed" is a nominated pod, we should remove it from internal cache
+	if sched.config.SchedulingQueue != nil {
+		sched.config.SchedulingQueue.DeleteNominatedPodIfExists(assumed)
 	}
 
 	// Optimistically assume that the binding will succeed, so we need to invalidate affected
@@ -422,9 +442,10 @@ func (sched *Scheduler) bind(assumed *v1.Pod, b *v1.Binding) error {
 		sched.config.Error(assumed, err)
 		sched.config.Recorder.Eventf(assumed, v1.EventTypeWarning, "FailedScheduling", "Binding rejected: %v", err)
 		sched.config.PodConditionUpdater.Update(assumed, &v1.PodCondition{
-			Type:   v1.PodScheduled,
-			Status: v1.ConditionFalse,
-			Reason: "BindingRejected",
+			Type:          v1.PodScheduled,
+			Status:        v1.ConditionFalse,
+			LastProbeTime: metav1.Now(),
+			Reason:        "BindingRejected",
 		})
 		return err
 	}

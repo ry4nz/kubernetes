@@ -944,6 +944,11 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			test.predicates[algorithmpredicates.MatchInterPodAffinityPred] = algorithmpredicates.NewPodAffinityPredicate(FakeNodeInfo(*nodes[0]), schedulertesting.FakePodLister(test.pods))
 		}
 		nodeNameToInfo := schedulercache.CreateNodeNameToInfoMap(test.pods, nodes)
+		// newnode simulate a case that a new node is added to the cluster, but nodeNameToInfo
+		// doesn't have it yet.
+		newnode := makeNode("newnode", 1000*5, priorityutil.DefaultMemoryRequest*5)
+		newnode.ObjectMeta.Labels = map[string]string{"hostname": "newnode"}
+		nodes = append(nodes, newnode)
 		nodeToPods, err := selectNodesForPreemption(test.pod, nodeNameToInfo, nodes, test.predicates, PredicateMetadata, nil, nil)
 		if err != nil {
 			t.Error(err)
@@ -1388,13 +1393,18 @@ func TestPreempt(t *testing.T) {
 			schedulertesting.FakePersistentVolumeClaimLister{},
 			false,
 			false)
+
+		cache.UpdateNodeNameToInfoMap(scheduler.(*genericScheduler).cachedNodeInfoMap)
 		// Call Preempt and check the expected results.
 		node, victims, _, err := scheduler.Preempt(test.pod, schedulertesting.FakeNodeLister(makeNodeList(nodeNames)), error(&FitError{Pod: test.pod, FailedPredicates: failedPredMap}))
 		if err != nil {
 			t.Errorf("test [%v]: unexpected error in preemption: %v", test.name, err)
 		}
-		if (node != nil && node.Name != test.expectedNode) || (node == nil && len(test.expectedNode) != 0) {
+		if node != nil && node.Name != test.expectedNode {
 			t.Errorf("test [%v]: expected node: %v, got: %v", test.name, test.expectedNode, node)
+		}
+		if node == nil && len(test.expectedNode) != 0 {
+			t.Errorf("expected node: %v, got: nothing", test.expectedNode)
 		}
 		if len(victims) != len(test.expectedPods) {
 			t.Errorf("test [%v]: expected %v pods, got %v.", test.name, len(test.expectedPods), len(victims))
