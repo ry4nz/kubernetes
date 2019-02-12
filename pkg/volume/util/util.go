@@ -18,17 +18,23 @@ package util
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	utypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
@@ -36,21 +42,11 @@ import (
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	"k8s.io/kubernetes/pkg/features"
-	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 	"k8s.io/kubernetes/pkg/util/mount"
-	utilstrings "k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
-
-	"reflect"
-
-	"hash/fnv"
-	"math/rand"
-	"strconv"
-
-	"k8s.io/apimachinery/pkg/api/resource"
-	utypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/kubernetes/pkg/volume/util/types"
 	"k8s.io/kubernetes/pkg/volume/util/volumepathhandler"
+	utilstrings "k8s.io/utils/strings"
 )
 
 const (
@@ -77,6 +73,9 @@ const (
 	// VolumeDynamicallyCreatedByKey is the key of the annotation on PersistentVolume
 	// object created dynamically
 	VolumeDynamicallyCreatedByKey = "kubernetes.io/createdby"
+
+	// LabelMultiZoneDelimiter separates zones for volumes
+	LabelMultiZoneDelimiter = "__"
 )
 
 // VolumeZoneConfig contains config information about zonal volume.
@@ -252,9 +251,9 @@ func SelectZonesForVolume(zoneParameterPresent, zonesParameterPresent bool, zone
 
 		// pick node's zone for one of the replicas
 		var ok bool
-		zoneFromNode, ok = node.ObjectMeta.Labels[kubeletapis.LabelZoneFailureDomain]
+		zoneFromNode, ok = node.ObjectMeta.Labels[v1.LabelZoneFailureDomain]
 		if !ok {
-			return nil, fmt.Errorf("%s Label for node missing", kubeletapis.LabelZoneFailureDomain)
+			return nil, fmt.Errorf("%s Label for node missing", v1.LabelZoneFailureDomain)
 		}
 		// if single replica volume and node with zone found, return immediately
 		if numReplicas == 1 {
@@ -269,7 +268,7 @@ func SelectZonesForVolume(zoneParameterPresent, zonesParameterPresent bool, zone
 	}
 
 	if (len(allowedTopologies) > 0) && (allowedZones.Len() == 0) {
-		return nil, fmt.Errorf("no matchLabelExpressions with %s key found in allowedTopologies. Please specify matchLabelExpressions with %s key", kubeletapis.LabelZoneFailureDomain, kubeletapis.LabelZoneFailureDomain)
+		return nil, fmt.Errorf("no matchLabelExpressions with %s key found in allowedTopologies. Please specify matchLabelExpressions with %s key", v1.LabelZoneFailureDomain, v1.LabelZoneFailureDomain)
 	}
 
 	if allowedZones.Len() > 0 {
@@ -319,7 +318,7 @@ func ZonesFromAllowedTopologies(allowedTopologies []v1.TopologySelectorTerm) (se
 	zones := make(sets.String)
 	for _, term := range allowedTopologies {
 		for _, exp := range term.MatchLabelExpressions {
-			if exp.Key == kubeletapis.LabelZoneFailureDomain {
+			if exp.Key == v1.LabelZoneFailureDomain {
 				for _, value := range exp.Values {
 					zones.Insert(value)
 				}
@@ -333,7 +332,7 @@ func ZonesFromAllowedTopologies(allowedTopologies []v1.TopologySelectorTerm) (se
 
 // ZonesSetToLabelValue converts zones set to label value
 func ZonesSetToLabelValue(strSet sets.String) string {
-	return strings.Join(strSet.UnsortedList(), kubeletapis.LabelMultiZoneDelimiter)
+	return strings.Join(strSet.UnsortedList(), LabelMultiZoneDelimiter)
 }
 
 // ZonesToSet converts a string containing a comma separated list of zones to set
@@ -347,7 +346,7 @@ func ZonesToSet(zonesString string) (sets.String, error) {
 
 // LabelZonesToSet converts a PV label value from string containing a delimited list of zones to set
 func LabelZonesToSet(labelZonesValue string) (sets.String, error) {
-	return stringToSet(labelZonesValue, kubeletapis.LabelMultiZoneDelimiter)
+	return stringToSet(labelZonesValue, LabelMultiZoneDelimiter)
 }
 
 // StringToSet converts a string containing list separated by specified delimiter to a set
@@ -369,7 +368,7 @@ func stringToSet(str, delimiter string) (sets.String, error) {
 
 // LabelZonesToList converts a PV label value from string containing a delimited list of zones to list
 func LabelZonesToList(labelZonesValue string) ([]string, error) {
-	return stringToList(labelZonesValue, kubeletapis.LabelMultiZoneDelimiter)
+	return stringToList(labelZonesValue, LabelMultiZoneDelimiter)
 }
 
 // StringToList converts a string containing list separated by specified delimiter to a list

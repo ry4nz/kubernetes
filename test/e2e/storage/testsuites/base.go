@@ -22,11 +22,13 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	"k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -79,15 +81,31 @@ func RunTestSuite(f *framework.Framework, driver TestDriver, tsInits []func() Te
 // skipUnsupportedTest will skip tests if the combination of driver, testsuite, and testpattern
 // is not suitable to be tested.
 // Whether it needs to be skipped is checked by following steps:
-// 1. Check if Whether volType is supported by driver from its interface
-// 2. Check if fsType is supported
-// 3. Check with driver specific logic
-// 4. Check with testSuite specific logic
+// 1. Check if Whether SnapshotType is supported by driver from its interface
+// 2. Check if Whether volType is supported by driver from its interface
+// 3. Check if fsType is supported
+// 4. Check with driver specific logic
+// 5. Check with testSuite specific logic
 func skipUnsupportedTest(suite TestSuite, driver TestDriver, pattern testpatterns.TestPattern) {
 	dInfo := driver.GetDriverInfo()
-
-	// 1. Check if Whether volType is supported by driver from its interface
 	var isSupported bool
+
+	// 1. Check if Whether SnapshotType is supported by driver from its interface
+	// if isSupported, so it must be a snapshot test case, we just return.
+	if len(pattern.SnapshotType) > 0 {
+		switch pattern.SnapshotType {
+		case testpatterns.DynamicCreatedSnapshot:
+			_, isSupported = driver.(SnapshottableTestDriver)
+		default:
+			isSupported = false
+		}
+		if !isSupported {
+			framework.Skipf("Driver %s doesn't support snapshot type %v -- skipping", dInfo.Name, pattern.SnapshotType)
+		}
+		return
+	}
+
+	// 2. Check if Whether volType is supported by driver from its interface
 	switch pattern.VolType {
 	case testpatterns.InlineVolume:
 		_, isSupported = driver.(InlineVolumeTestDriver)
@@ -103,7 +121,7 @@ func skipUnsupportedTest(suite TestSuite, driver TestDriver, pattern testpattern
 		framework.Skipf("Driver %s doesn't support %v -- skipping", dInfo.Name, pattern.VolType)
 	}
 
-	// 2. Check if fsType is supported
+	// 3. Check if fsType is supported
 	if !dInfo.SupportedFsType.Has(pattern.FsType) {
 		framework.Skipf("Driver %s doesn't support %v -- skipping", dInfo.Name, pattern.FsType)
 	}
@@ -111,10 +129,10 @@ func skipUnsupportedTest(suite TestSuite, driver TestDriver, pattern testpattern
 		framework.Skipf("Distro doesn't support xfs -- skipping")
 	}
 
-	// 3. Check with driver specific logic
+	// 4. Check with driver specific logic
 	driver.SkipUnsupportedTest(pattern)
 
-	// 4. Check with testSuite specific logic
+	// 5. Check with testSuite specific logic
 	suite.skipUnsupportedTest(pattern, driver)
 }
 
@@ -157,9 +175,9 @@ func (r *genericVolumeTestResource) setupResource(driver TestDriver, pattern tes
 	case testpatterns.PreprovisionedPV:
 		framework.Logf("Creating resource for pre-provisioned PV")
 		if pDriver, ok := driver.(PreprovisionedPVTestDriver); ok {
-			pvSource := pDriver.GetPersistentVolumeSource(false, fsType, r.driverTestResource)
+			pvSource, volumeNodeAffinity := pDriver.GetPersistentVolumeSource(false, fsType, r.driverTestResource)
 			if pvSource != nil {
-				r.volSource, r.pv, r.pvc = createVolumeSourceWithPVCPV(f, dInfo.Name, pvSource, false)
+				r.volSource, r.pv, r.pvc = createVolumeSourceWithPVCPV(f, dInfo.Name, pvSource, volumeNodeAffinity, false)
 			}
 			r.volType = fmt.Sprintf("%s-preprovisionedPV", dInfo.Name)
 		}
@@ -231,12 +249,14 @@ func createVolumeSourceWithPVCPV(
 	f *framework.Framework,
 	name string,
 	pvSource *v1.PersistentVolumeSource,
+	volumeNodeAffinity *v1.VolumeNodeAffinity,
 	readOnly bool,
 ) (*v1.VolumeSource, *v1.PersistentVolume, *v1.PersistentVolumeClaim) {
 	pvConfig := framework.PersistentVolumeConfig{
 		NamePrefix:       fmt.Sprintf("%s-", name),
 		StorageClassName: f.Namespace.Name,
 		PVSource:         *pvSource,
+		NodeAffinity:     volumeNodeAffinity,
 	}
 	pvcConfig := framework.PersistentVolumeClaimConfig{
 		StorageClassName: &f.Namespace.Name,
@@ -346,4 +366,26 @@ func convertTestConfig(in *TestConfig) framework.VolumeTestConfig {
 		ClientNodeName: in.ClientNodeName,
 		NodeSelector:   in.ClientNodeSelector,
 	}
+}
+
+func getSnapshot(claimName string, ns, snapshotClassName string) *unstructured.Unstructured {
+	snapshot := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "VolumeSnapshot",
+			"apiVersion": snapshotAPIVersion,
+			"metadata": map[string]interface{}{
+				"generateName": "snapshot-",
+				"namespace":    ns,
+			},
+			"spec": map[string]interface{}{
+				"snapshotClassName": snapshotClassName,
+				"source": map[string]interface{}{
+					"name": claimName,
+					"kind": "PersistentVolumeClaim",
+				},
+			},
+		},
+	}
+
+	return snapshot
 }

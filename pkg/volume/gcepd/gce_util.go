@@ -28,15 +28,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cloudprovider "k8s.io/cloud-provider"
+	cloudfeatures "k8s.io/cloud-provider/features"
 	"k8s.io/klog"
 	gcecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/gce"
-	"k8s.io/kubernetes/pkg/features"
-	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
-	utilfile "k8s.io/kubernetes/pkg/util/file"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/utils/exec"
+	utilpath "k8s.io/utils/path"
 )
 
 const (
@@ -127,10 +126,10 @@ func (util *GCEDiskUtil) CreateVolume(c *gcePersistentDiskProvisioner, node *v1.
 				return "", 0, nil, "", err
 			}
 		case "replication-type":
-			if !utilfeature.DefaultFeatureGate.Enabled(features.GCERegionalPersistentDisk) {
+			if !utilfeature.DefaultFeatureGate.Enabled(cloudfeatures.GCERegionalPersistentDisk) {
 				return "", 0, nil, "",
 					fmt.Errorf("the %q option for volume plugin %v is only supported with the %q Kubernetes feature gate enabled",
-						k, c.plugin.GetPluginName(), features.GCERegionalPersistentDisk)
+						k, c.plugin.GetPluginName(), cloudfeatures.GCERegionalPersistentDisk)
 			}
 			replicationType = strings.ToLower(v)
 		case volume.VolumeParameterFSType:
@@ -236,7 +235,7 @@ func verifyDevicePath(devicePaths []string, sdBeforeSet sets.String, diskName st
 
 // Calls scsi_id on the given devicePath to get the serial number reported by that device.
 func getScsiSerial(devicePath, diskName string) (string, error) {
-	exists, err := utilfile.FileExists("/lib/udev/scsi_id")
+	exists, err := utilpath.Exists(utilpath.CheckFollowSymlink, "/lib/udev/scsi_id")
 	if err != nil {
 		return "", fmt.Errorf("failed to check scsi_id existence: %v", err)
 	}
@@ -354,8 +353,8 @@ func udevadmChangeToDrive(drivePath string) error {
 // Checks whether the given GCE PD volume spec is associated with a regional PD.
 func isRegionalPD(spec *volume.Spec) bool {
 	if spec.PersistentVolume != nil {
-		zonesLabel := spec.PersistentVolume.Labels[kubeletapis.LabelZoneFailureDomain]
-		zones := strings.Split(zonesLabel, kubeletapis.LabelMultiZoneDelimiter)
+		zonesLabel := spec.PersistentVolume.Labels[v1.LabelZoneFailureDomain]
+		zones := strings.Split(zonesLabel, volumeutil.LabelMultiZoneDelimiter)
 		return len(zones) > 1
 	}
 	return false

@@ -36,7 +36,7 @@ import (
 	kubeadmapiv1beta1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta1"
 	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/validation"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
-	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases"
+	phases "k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/init"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -148,6 +148,7 @@ func NewCmdInit(out io.Writer, initOptions *initOptions) *cobra.Command {
 			err = showJoinCommand(data, out)
 			kubeadmutil.CheckErr(err)
 		},
+		Args: cobra.NoArgs,
 	}
 
 	// adds flags to the init command
@@ -167,7 +168,7 @@ func NewCmdInit(out io.Writer, initOptions *initOptions) *cobra.Command {
 	})
 
 	// initialize the workflow runner with the list of phases
-	initRunner.AppendPhase(phases.NewPreflightMasterPhase())
+	initRunner.AppendPhase(phases.NewPreflightPhase())
 	initRunner.AppendPhase(phases.NewKubeletStartPhase())
 	initRunner.AppendPhase(phases.NewCertsPhase())
 	initRunner.AppendPhase(phases.NewKubeConfigPhase())
@@ -237,10 +238,7 @@ func AddInitConfigFlags(flagSet *flag.FlagSet, cfg *kubeadmapiv1beta1.InitConfig
 
 // AddInitOtherFlags adds init flags that are not bound to a configuration file to the given flagset
 func AddInitOtherFlags(flagSet *flag.FlagSet, cfgPath *string, skipTokenPrint, dryRun *bool, ignorePreflightErrors *[]string) {
-	flagSet.StringVar(
-		cfgPath, options.CfgPath, *cfgPath,
-		"Path to kubeadm config file. WARNING: Usage of a configuration file is experimental.",
-	)
+	options.AddConfigFlag(flagSet, cfgPath)
 	flagSet.StringSliceVar(
 		ignorePreflightErrors, options.IgnorePreflightErrors, *ignorePreflightErrors,
 		"A list of checks whose errors will be shown as warnings. Example: 'IsPrivilegedUser,Swap'. Value 'all' ignores errors from all checks.",
@@ -286,27 +284,27 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 	// validated values to the public kubeadm config API when applicable
 	var err error
 	if options.externalcfg.FeatureGates, err = features.NewFeatureGate(&features.InitFeatureGates, options.featureGatesString); err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	ignorePreflightErrorsSet, err := validation.ValidateIgnorePreflightErrors(options.ignorePreflightErrors)
 	if err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	if err = validation.ValidateMixedArguments(cmd.Flags()); err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	if err = options.bto.ApplyTo(options.externalcfg); err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	// Either use the config file if specified, or convert public kubeadm API to the internal InitConfiguration
 	// and validates InitConfiguration
-	cfg, err := configutil.ConfigFileAndDefaultsToInternalConfig(options.cfgPath, options.externalcfg)
+	cfg, err := configutil.LoadOrDefaultInitConfiguration(options.cfgPath, options.externalcfg)
 	if err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	// override node name and CRI socket from the command line options
@@ -318,29 +316,29 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 	}
 
 	if err := configutil.VerifyAPIServerBindAddress(cfg.LocalAPIEndpoint.AdvertiseAddress); err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 	if err := features.ValidateVersion(features.InitFeatureGates, cfg.FeatureGates, cfg.KubernetesVersion); err != nil {
-		return &initData{}, err
+		return nil, err
 	}
 
 	// if dry running creates a temporary folder for saving kubeadm generated files
 	dryRunDir := ""
 	if options.dryRun {
 		if dryRunDir, err = ioutil.TempDir("", "kubeadm-init-dryrun"); err != nil {
-			return &initData{}, errors.Wrap(err, "couldn't create a temporary directory")
+			return nil, errors.Wrap(err, "couldn't create a temporary directory")
 		}
 	}
 
 	// Checks if an external CA is provided by the user.
-	externalCA, _ := certsphase.UsingExternalCA(cfg)
+	externalCA, _ := certsphase.UsingExternalCA(&cfg.ClusterConfiguration)
 	if externalCA {
 		kubeconfigDir := kubeadmconstants.KubernetesDir
 		if options.dryRun {
 			kubeconfigDir = dryRunDir
 		}
 		if err := kubeconfigphase.ValidateKubeconfigsForExternalCA(kubeconfigDir, cfg); err != nil {
-			return &initData{}, err
+			return nil, err
 		}
 	}
 

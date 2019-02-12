@@ -201,7 +201,7 @@ func TestEnsureProxyAddon(t *testing.T) {
 			masterConfig.Networking.PodSubnet = "2001:101::/96"
 		}
 
-		intMaster, err := configutil.ConfigFileAndDefaultsToInternalConfig("", masterConfig)
+		intMaster, err := configutil.DefaultedInitConfiguration(masterConfig)
 		if err != nil {
 			t.Errorf("test failed to convert external to internal version")
 			break
@@ -223,7 +223,7 @@ func TestEnsureProxyAddon(t *testing.T) {
 			t.Errorf("test failed to set dynamic defaults: %v", err)
 			break
 		}
-		err = EnsureProxyAddon(intMaster, client)
+		err = EnsureProxyAddon(&intMaster.ClusterConfiguration, &intMaster.LocalAPIEndpoint, client)
 
 		// Compare actual to expected errors
 		actErr := "No error"
