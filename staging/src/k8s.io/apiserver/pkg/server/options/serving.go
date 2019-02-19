@@ -27,6 +27,11 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/klog"
 
+	// NOTE(dperny): this change is not in the kubernetes mainline; it is only
+	// in this fork. Import tlsconfig so we can use its default cipher suites
+	// in the kubernetes api server.
+	"github.com/docker/go-connections/tlsconfig"
+
 	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apiserver/pkg/server"
 	certutil "k8s.io/client-go/util/cert"
@@ -240,6 +245,11 @@ func (s *SecureServingOptions) ApplyTo(config **server.SecureServingInfo) error 
 		}
 		c.CipherSuites = cipherSuites
 	}
+
+	// NOTE(dperny): this change is not in the kubernetes mainline; it is only
+	// in this fork. Import tlsconfig so we can use its default cipher suites
+	// in the kubernetes api server.
+	c.CipherSuites = tlsconfig.DefaultServerAcceptedCiphers
 
 	var err error
 	c.MinTLSVersion, err = cliflag.TLSVersion(s.MinTLSVersion)
