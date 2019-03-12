@@ -163,7 +163,7 @@ func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
 	// Notary repository.
 	imagePullSecretsData := make([]string, len(podSpec.ImagePullSecrets))
 	for i, secretRef := range podSpec.ImagePullSecrets {
-		secret, err := a.internalKubeClient.Core().Secrets(attributes.GetNamespace()).Get(secretRef.Name, metav1.GetOptions{})
+		secret, err := a.internalKubeClient.CoreV1().Secrets(attributes.GetNamespace()).Get(secretRef.Name, metav1.GetOptions{})
 		if err != nil {
 			return admission.NewForbidden(attributes, fmt.Errorf("unable to lookup image pull secret %q from namespace %q: %s", secretRef.Name, attributes.GetNamespace(), err))
 		}
