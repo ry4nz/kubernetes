@@ -45,7 +45,6 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 )
 
 const (
@@ -349,7 +348,7 @@ func GetNodePublicIps(c clientset.Interface) ([]string, error) {
 
 func PickNodeIP(c clientset.Interface) string {
 	publicIps, err := GetNodePublicIps(c)
-	Expect(err).NotTo(HaveOccurred())
+	ExpectNoError(err)
 	if len(publicIps) == 0 {
 		Failf("got unexpected number (%d) of public IPs", len(publicIps))
 	}
@@ -1454,6 +1453,7 @@ type affinityTracker struct {
 // Record the response going to a given host.
 func (at *affinityTracker) recordHost(host string) {
 	at.hostTrace = append(at.hostTrace, host)
+	Logf("Received response from host: %s", host)
 }
 
 // Check that we got a constant count requests going to the same host.
@@ -1481,13 +1481,11 @@ func checkAffinityFailed(tracker affinityTracker, err string) {
 }
 
 // CheckAffinity function tests whether the service affinity works as expected.
-// If affinity is expected and transitionState is true, the test will
-// return true once affinityConfirmCount number of same response observed in a
-// row. If affinity is not expected, the test will keep observe until different
-// responses observed. The function will return false only when no expected
-// responses observed before timeout. If transitionState is false, the test will
-// fail once different host is given if shouldHold is true.
-func CheckAffinity(jig *ServiceTestJig, execPod *v1.Pod, targetIp string, targetPort int, shouldHold, transitionState bool) bool {
+// If affinity is expected, the test will return true once affinityConfirmCount
+// number of same response observed in a row. If affinity is not expected, the
+// test will keep observe until different responses observed. The function will
+// return false only in case of unexpected errors.
+func CheckAffinity(jig *ServiceTestJig, execPod *v1.Pod, targetIp string, targetPort int, shouldHold bool) bool {
 	targetIpPort := net.JoinHostPort(targetIp, strconv.Itoa(targetPort))
 	cmd := fmt.Sprintf(`wget -qO- http://%s/ -T 2`, targetIpPort)
 	timeout := ServiceTestTimeout
@@ -1511,13 +1509,8 @@ func CheckAffinity(jig *ServiceTestJig, execPod *v1.Pod, targetIp string, target
 		if !shouldHold && !affinityHolds {
 			return true, nil
 		}
-		if shouldHold {
-			if !transitionState && !affinityHolds {
-				return true, fmt.Errorf("Affinity should hold but didn't.")
-			}
-			if trackerFulfilled && affinityHolds {
-				return true, nil
-			}
+		if shouldHold && trackerFulfilled && affinityHolds {
+			return true, nil
 		}
 		return false, nil
 	}); pollErr != nil {

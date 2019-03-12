@@ -99,7 +99,7 @@ func TestParseConfig(t *testing.T) {
 		MaximumLoadBalancerRuleCount:      1,
 		PrimaryAvailabilitySetName:        "primaryAvailabilitySetName",
 		PrimaryScaleSetName:               "primaryScaleSetName",
-		ResourceGroup:                     "resourceGroup",
+		ResourceGroup:                     "resourcegroup",
 		RouteTableName:                    "routeTableName",
 		SecurityGroupName:                 "securityGroupName",
 		SubnetName:                        "subnetName",
@@ -1209,7 +1209,7 @@ func validateLoadBalancer(t *testing.T, loadBalancer *network.LoadBalancer, serv
 		}
 		for _, wantedRule := range svc.Spec.Ports {
 			expectedRuleCount++
-			wantedRuleName := az.getLoadBalancerRuleName(&svc, wantedRule, subnet(&svc))
+			wantedRuleName := az.getLoadBalancerRuleName(&svc, wantedRule.Protocol, wantedRule.Port, subnet(&svc))
 			foundRule := false
 			for _, actualRule := range *loadBalancer.LoadBalancingRules {
 				if strings.EqualFold(*actualRule.Name, wantedRuleName) &&
@@ -1676,7 +1676,8 @@ func validateEmptyConfig(t *testing.T, config string) {
 func TestGetZone(t *testing.T) {
 	cloud := &Cloud{
 		Config: Config{
-			Location: "eastus",
+			Location:            "eastus",
+			UseInstanceMetadata: true,
 		},
 	}
 	testcases := []struct {

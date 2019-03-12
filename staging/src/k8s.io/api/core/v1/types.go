@@ -151,6 +151,9 @@ type VolumeSource struct {
 	// StorageOS represents a StorageOS volume attached and mounted on Kubernetes nodes.
 	// +optional
 	StorageOS *StorageOSVolumeSource `json:"storageos,omitempty" protobuf:"bytes,27,opt,name=storageos"`
+	// CSI (Container Storage Interface) represents storage that is handled by an external CSI driver (Alpha feature).
+	// +optional
+	CSI *CSIVolumeSource `json:"csi,omitempty" protobuf:"bytes,28,opt,name=csi"`
 }
 
 // PersistentVolumeClaimVolumeSource references the user's PVC in the same namespace.
@@ -248,7 +251,7 @@ type PersistentVolumeSource struct {
 	// More info: https://releases.k8s.io/HEAD/examples/volumes/storageos/README.md
 	// +optional
 	StorageOS *StorageOSPersistentVolumeSource `json:"storageos,omitempty" protobuf:"bytes,21,opt,name=storageos"`
-	// CSI represents storage that handled by an external CSI driver (Beta feature).
+	// CSI represents storage that is handled by an external CSI driver (Beta feature).
 	// +optional
 	CSI *CSIPersistentVolumeSource `json:"csi,omitempty" protobuf:"bytes,22,opt,name=csi"`
 }
@@ -1691,6 +1694,37 @@ type CSIPersistentVolumeSource struct {
 	NodePublishSecretRef *SecretReference `json:"nodePublishSecretRef,omitempty" protobuf:"bytes,8,opt,name=nodePublishSecretRef"`
 }
 
+// Represents a source location of a volume to mount, managed by an external CSI driver
+type CSIVolumeSource struct {
+	// Driver is the name of the CSI driver that handles this volume.
+	// Consult with your admin for the correct name as registered in the cluster.
+	Driver string `json:"driver" protobuf:"bytes,1,opt,name=driver"`
+
+	// Specifies a read-only configuration for the volume.
+	// Defaults to false (read/write).
+	// +optional
+	ReadOnly *bool `json:"readOnly,omitempty" protobuf:"varint,2,opt,name=readOnly"`
+
+	// Filesystem type to mount. Ex. "ext4", "xfs", "ntfs".
+	// If not provided, the empty value is passed to the associated CSI driver
+	// which will determine the default filesystem to apply.
+	// +optional
+	FSType *string `json:"fsType,omitempty" protobuf:"bytes,3,opt,name=fsType"`
+
+	// VolumeAttributes stores driver-specific properties that are passed to the CSI
+	// driver. Consult your driver's documentation for supported values.
+	// +optional
+	VolumeAttributes map[string]string `json:"volumeAttributes,omitempty" protobuf:"bytes,4,rep,name=volumeAttributes"`
+
+	// NodePublishSecretRef is a reference to the secret object containing
+	// sensitive information to pass to the CSI driver to complete the CSI
+	// NodePublishVolume and NodeUnpublishVolume calls.
+	// This field is optional, and  may be empty if no secret is required. If the
+	// secret object contains more than one secret, all secret references are passed.
+	// +optional
+	NodePublishSecretRef *LocalObjectReference `json:"nodePublishSecretRef,omitempty" protobuf:"bytes,5,opt,name=nodePublishSecretRef"`
+}
+
 // ContainerPort represents a network port in a single container.
 type ContainerPort struct {
 	// If specified, this must be an IANA_SVC_NAME and unique within the pod. Each
@@ -1737,6 +1771,13 @@ type VolumeMount struct {
 	// This field is beta in 1.10.
 	// +optional
 	MountPropagation *MountPropagationMode `json:"mountPropagation,omitempty" protobuf:"bytes,5,opt,name=mountPropagation,casttype=MountPropagationMode"`
+	// Expanded path within the volume from which the container's volume should be mounted.
+	// Behaves similarly to SubPath but environment variable references $(VAR_NAME) are expanded using the container's environment.
+	// Defaults to "" (volume's root).
+	// SubPathExpr and SubPath are mutually exclusive.
+	// This field is alpha in 1.14.
+	// +optional
+	SubPathExpr string `json:"subPathExpr,omitempty" protobuf:"bytes,6,opt,name=subPathExpr"`
 }
 
 // MountPropagationMode describes mount propagation.
@@ -2221,11 +2262,15 @@ type Lifecycle struct {
 	// More info: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
 	// +optional
 	PostStart *Handler `json:"postStart,omitempty" protobuf:"bytes,1,opt,name=postStart"`
-	// PreStop is called immediately before a container is terminated.
-	// The container is terminated after the handler completes.
-	// The reason for termination is passed to the handler.
-	// Regardless of the outcome of the handler, the container is eventually terminated.
-	// Other management of the container blocks until the hook completes.
+	// PreStop is called immediately before a container is terminated due to an
+	// API request or management event such as liveness probe failure,
+	// preemption, resource contention, etc. The handler is not called if the
+	// container crashes or exits. The reason for termination is passed to the
+	// handler. The Pod's termination grace period countdown begins before the
+	// PreStop hooked is executed. Regardless of the outcome of the handler, the
+	// container will eventually terminate within the Pod's termination grace
+	// period. Other management of the container blocks until the hook completes
+	// or until the termination grace period is reached.
 	// More info: https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks
 	// +optional
 	PreStop *Handler `json:"preStop,omitempty" protobuf:"bytes,2,opt,name=preStop"`

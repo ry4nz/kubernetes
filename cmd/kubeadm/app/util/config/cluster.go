@@ -59,7 +59,6 @@ func FetchInitConfigurationFromCluster(client clientset.Interface, w io.Writer, 
 
 // getInitConfigurationFromCluster is separate only for testing purposes, don't call it directly, use FetchInitConfigurationFromCluster instead
 func getInitConfigurationFromCluster(kubeconfigDir string, client clientset.Interface, newControlPlane bool) (*kubeadmapi.InitConfiguration, error) {
-	// TODO: This code should support reading the MasterConfiguration key as well for backwards-compat
 	// Also, the config map really should be KubeadmConfigConfigMap...
 	configMap, err := client.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(constants.KubeadmConfigConfigMap, metav1.GetOptions{})
 	if err != nil {
@@ -168,7 +167,7 @@ func getNodeNameFromKubeletConfig(kubeconfigDir string) (string, error) {
 // getAPIEndpoint returns the APIEndpoint for the current node
 func getAPIEndpoint(data map[string]string, nodeName string, apiEndpoint *kubeadmapi.APIEndpoint) error {
 	// gets the ClusterStatus from kubeadm-config
-	clusterStatus, err := unmarshalClusterStatus(data)
+	clusterStatus, err := UnmarshalClusterStatus(data)
 	if err != nil {
 		return err
 	}
@@ -211,7 +210,7 @@ func GetClusterStatus(client clientset.Interface) (*kubeadmapi.ClusterStatus, er
 		return nil, err
 	}
 
-	clusterStatus, err := unmarshalClusterStatus(configMap.Data)
+	clusterStatus, err := UnmarshalClusterStatus(configMap.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +218,8 @@ func GetClusterStatus(client clientset.Interface) (*kubeadmapi.ClusterStatus, er
 	return clusterStatus, nil
 }
 
-func unmarshalClusterStatus(data map[string]string) (*kubeadmapi.ClusterStatus, error) {
+// UnmarshalClusterStatus takes raw ConfigMap.Data and converts it to a ClusterStatus object
+func UnmarshalClusterStatus(data map[string]string) (*kubeadmapi.ClusterStatus, error) {
 	clusterStatusData, ok := data[constants.ClusterStatusConfigMapKey]
 	if !ok {
 		return nil, errors.Errorf("unexpected error when reading kubeadm-config ConfigMap: %s key value pair missing", constants.ClusterStatusConfigMapKey)

@@ -17,6 +17,7 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -158,6 +159,7 @@ func makeFakeContainer(t *testing.T, m *kubeGenericRuntimeManager, template cont
 			State:       template.state,
 			Labels:      containerConfig.Labels,
 			Annotations: containerConfig.Annotations,
+			LogPath:     filepath.Join(sandboxConfig.GetLogDirectory(), containerConfig.GetLogPath()),
 		},
 		SandboxID: podSandboxID,
 	}
@@ -384,7 +386,7 @@ func TestGetPods(t *testing.T) {
 	assert.NoError(t, err)
 
 	if !verifyPods(expected, actual) {
-		t.Errorf("expected %q, got %q", expected, actual)
+		t.Errorf("expected %#v, got %#v", expected, actual)
 	}
 }
 

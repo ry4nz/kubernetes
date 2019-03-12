@@ -42,8 +42,10 @@ func NewCRIStatsProvider(
 	runtimeService internalapi.RuntimeService,
 	imageService internalapi.ImageManagerService,
 	logMetricsService LogMetricsService,
+	osInterface kubecontainer.OSInterface,
 ) *StatsProvider {
-	return newStatsProvider(cadvisor, podManager, runtimeCache, newCRIStatsProvider(cadvisor, resourceAnalyzer, runtimeService, imageService, logMetricsService))
+	return newStatsProvider(cadvisor, podManager, runtimeCache, newCRIStatsProvider(cadvisor, resourceAnalyzer,
+		runtimeService, imageService, logMetricsService, osInterface))
 }
 
 // NewCadvisorStatsProvider returns a containerStatsProvider that provides both
@@ -88,6 +90,7 @@ type StatsProvider struct {
 // containers managed by pods.
 type containerStatsProvider interface {
 	ListPodStats() ([]statsapi.PodStats, error)
+	ListPodStatsAndUpdateCPUNanoCoreUsage() ([]statsapi.PodStats, error)
 	ListPodCPUAndMemoryStats() ([]statsapi.PodStats, error)
 	ImageFsStats() (*statsapi.FsStats, error)
 	ImageFsDevice() (string, error)

@@ -27,7 +27,6 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
-	"k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/validation"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
@@ -54,7 +53,6 @@ type applyFlags struct {
 	dryRun             bool
 	etcdUpgrade        bool
 	criSocket          string
-	newK8sVersionStr   string
 	imagePullTimeout   time.Duration
 }
 
@@ -77,42 +75,10 @@ func NewCmdApply(apf *applyPlanFlags) *cobra.Command {
 		DisableFlagsInUseLine: true,
 		Short:                 "Upgrade your Kubernetes cluster to the specified version.",
 		Run: func(cmd *cobra.Command, args []string) {
-			var err error
-			flags.ignorePreflightErrorsSet, err = validation.ValidateIgnorePreflightErrors(flags.ignorePreflightErrors)
+			userVersion, err := getK8sVersionFromUserInput(flags.applyPlanFlags, args, true)
 			kubeadmutil.CheckErr(err)
 
-			// Ensure the user is root
-			klog.V(1).Infof("running preflight checks")
-			err = runPreflightChecks(flags.ignorePreflightErrorsSet)
-			kubeadmutil.CheckErr(err)
-
-			// If the version is specified in config file, pick up that value.
-			if flags.cfgPath != "" {
-				// Note that cfg isn't preserved here, it's just an one-off to populate flags.newK8sVersionStr based on --config
-				cfg, err := configutil.LoadInitConfigurationFromFile(flags.cfgPath)
-				kubeadmutil.CheckErr(err)
-
-				if cfg.KubernetesVersion != "" {
-					flags.newK8sVersionStr = cfg.KubernetesVersion
-				}
-			}
-
-			// If the new version is already specified in config file, version arg is optional.
-			if flags.newK8sVersionStr == "" {
-				err = cmdutil.ValidateExactArgNumber(args, []string{"version"})
-				kubeadmutil.CheckErr(err)
-			}
-
-			// If option was specified in both args and config file, args will overwrite the config file.
-			if len(args) == 1 {
-				flags.newK8sVersionStr = args[0]
-			}
-
-			// Default the flags dynamically, based on each others' value
-			err = SetImplicitFlags(flags)
-			kubeadmutil.CheckErr(err)
-
-			err = runApply(flags)
+			err = runApply(flags, userVersion)
 			kubeadmutil.CheckErr(err)
 		},
 	}
@@ -145,12 +111,12 @@ func NewCmdApply(apf *applyPlanFlags) *cobra.Command {
 //   - Creating the RBAC rules for the bootstrap tokens and the cluster-info ConfigMap
 //   - Applying new kube-dns and kube-proxy manifests
 //   - Uploads the newly used configuration to the cluster ConfigMap
-func runApply(flags *applyFlags) error {
+func runApply(flags *applyFlags, userVersion string) error {
 
 	// Start with the basics, verify that the cluster is healthy and get the configuration from the cluster (using the ConfigMap)
-	klog.V(1).Infof("[upgrade/apply] verifying health of cluster")
-	klog.V(1).Infof("[upgrade/apply] retrieving configuration from cluster")
-	client, versionGetter, cfg, err := enforceRequirements(flags.applyPlanFlags, flags.dryRun, flags.newK8sVersionStr)
+	klog.V(1).Infoln("[upgrade/apply] verifying health of cluster")
+	klog.V(1).Infoln("[upgrade/apply] retrieving configuration from cluster")
+	client, versionGetter, cfg, err := enforceRequirements(flags.applyPlanFlags, flags.dryRun, userVersion)
 	if err != nil {
 		return err
 	}
@@ -161,13 +127,12 @@ func runApply(flags *applyFlags) error {
 	}
 
 	// Validate requested and validate actual version
-	klog.V(1).Infof("[upgrade/apply] validating requested and actual version")
+	klog.V(1).Infoln("[upgrade/apply] validating requested and actual version")
 	if err := configutil.NormalizeKubernetesVersion(&cfg.ClusterConfiguration); err != nil {
 		return err
 	}
 
 	// Use normalized version string in all following code.
-	flags.newK8sVersionStr = cfg.KubernetesVersion
 	newK8sVersion, err := version.ParseSemantic(cfg.KubernetesVersion)
 	if err != nil {
 		return errors.Errorf("unable to parse normalized version %q as a semantic version", cfg.KubernetesVersion)
@@ -178,8 +143,8 @@ func runApply(flags *applyFlags) error {
 	}
 
 	// Enforce the version skew policies
-	klog.V(1).Infof("[upgrade/version] enforcing version skew policies")
-	if err := EnforceVersionPolicies(newK8sVersion, flags, versionGetter); err != nil {
+	klog.V(1).Infoln("[upgrade/version] enforcing version skew policies")
+	if err := EnforceVersionPolicies(cfg.KubernetesVersion, newK8sVersion, flags, versionGetter); err != nil {
 		return errors.Wrap(err, "[upgrade/version] FATAL")
 	}
 
@@ -194,9 +159,9 @@ func runApply(flags *applyFlags) error {
 
 	// Use a prepuller implementation based on creating DaemonSets
 	// and block until all DaemonSets are ready; then we know for sure that all control plane images are cached locally
-	klog.V(1).Infof("[upgrade/apply] creating prepuller")
+	klog.V(1).Infoln("[upgrade/apply] creating prepuller")
 	prepuller := upgrade.NewDaemonSetPrepuller(client, waiter, &cfg.ClusterConfiguration)
-	componentsToPrepull := constants.MasterComponents
+	componentsToPrepull := constants.ControlPlaneComponents
 	if cfg.Etcd.External == nil && flags.etcdUpgrade {
 		componentsToPrepull = append(componentsToPrepull, constants.Etcd)
 	}
@@ -205,13 +170,13 @@ func runApply(flags *applyFlags) error {
 	}
 
 	// Now; perform the upgrade procedure
-	klog.V(1).Infof("[upgrade/apply] performing upgrade")
+	klog.V(1).Infoln("[upgrade/apply] performing upgrade")
 	if err := PerformControlPlaneUpgrade(flags, client, waiter, cfg); err != nil {
 		return errors.Wrap(err, "[upgrade/apply] FATAL")
 	}
 
 	// Upgrade RBAC rules and addons.
-	klog.V(1).Infof("[upgrade/postupgrade] upgrading RBAC rules and addons")
+	klog.V(1).Infoln("[upgrade/postupgrade] upgrading RBAC rules and addons")
 	if err := upgrade.PerformPostUpgradeTasks(client, cfg, newK8sVersion, flags.dryRun); err != nil {
 		return errors.Wrap(err, "[upgrade/postupgrade] FATAL post-upgrade error")
 	}
@@ -222,28 +187,19 @@ func runApply(flags *applyFlags) error {
 	}
 
 	fmt.Println("")
-	fmt.Printf("[upgrade/successful] SUCCESS! Your cluster was upgraded to %q. Enjoy!\n", flags.newK8sVersionStr)
+	fmt.Printf("[upgrade/successful] SUCCESS! Your cluster was upgraded to %q. Enjoy!\n", cfg.KubernetesVersion)
 	fmt.Println("")
 	fmt.Println("[upgrade/kubelet] Now that your control plane is upgraded, please proceed with upgrading your kubelets if you haven't already done so.")
 
 	return nil
 }
 
-// SetImplicitFlags handles dynamically defaulting flags based on each other's value
-func SetImplicitFlags(flags *applyFlags) error {
-	if len(flags.newK8sVersionStr) == 0 {
-		return errors.New("version string can't be empty")
-	}
-
-	return nil
-}
-
 // EnforceVersionPolicies makes sure that the version the user specified is valid to upgrade to
 // There are both fatal and skippable (with --force) errors
-func EnforceVersionPolicies(newK8sVersion *version.Version, flags *applyFlags, versionGetter upgrade.VersionGetter) error {
-	fmt.Printf("[upgrade/version] You have chosen to change the cluster version to %q\n", flags.newK8sVersionStr)
+func EnforceVersionPolicies(newK8sVersionStr string, newK8sVersion *version.Version, flags *applyFlags, versionGetter upgrade.VersionGetter) error {
+	fmt.Printf("[upgrade/version] You have chosen to change the cluster version to %q\n", newK8sVersionStr)
 
-	versionSkewErrs := upgrade.EnforceVersionPolicies(versionGetter, flags.newK8sVersionStr, newK8sVersion, flags.allowExperimentalUpgrades, flags.allowRCUpgrades)
+	versionSkewErrs := upgrade.EnforceVersionPolicies(versionGetter, newK8sVersionStr, newK8sVersion, flags.allowExperimentalUpgrades, flags.allowRCUpgrades)
 	if versionSkewErrs != nil {
 
 		if len(versionSkewErrs.Mandatory) > 0 {
@@ -268,7 +224,7 @@ func EnforceVersionPolicies(newK8sVersion *version.Version, flags *applyFlags, v
 func PerformControlPlaneUpgrade(flags *applyFlags, client clientset.Interface, waiter apiclient.Waiter, internalcfg *kubeadmapi.InitConfiguration) error {
 
 	// OK, the cluster is hosted using static pods. Upgrade a static-pod hosted cluster
-	fmt.Printf("[upgrade/apply] Upgrading your Static Pod-hosted control plane to version %q...\n", flags.newK8sVersionStr)
+	fmt.Printf("[upgrade/apply] Upgrading your Static Pod-hosted control plane to version %q...\n", internalcfg.KubernetesVersion)
 
 	if flags.dryRun {
 		return DryRunStaticPodUpgrade(internalcfg)
@@ -310,7 +266,7 @@ func DryRunStaticPodUpgrade(internalcfg *kubeadmapi.InitConfiguration) error {
 
 	// Print the contents of the upgraded manifests and pretend like they were in /etc/kubernetes/manifests
 	files := []dryrunutil.FileToPrint{}
-	for _, component := range constants.MasterComponents {
+	for _, component := range constants.ControlPlaneComponents {
 		realPath := constants.GetStaticPodFilepath(component, dryRunManifestDir)
 		outputPath := constants.GetStaticPodFilepath(component, constants.GetStaticPodDirectory())
 		files = append(files, dryrunutil.NewFileToPrint(realPath, outputPath))

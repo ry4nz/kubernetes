@@ -1,6 +1,6 @@
 {
 	"ImportPath": "k8s.io/apimachinery",
-	"GoVersion": "go1.11",
+	"GoVersion": "go1.12",
 	"GodepVersion": "v80-k8s-r1",
 	"Packages": [
 		"./..."
@@ -76,11 +76,11 @@
 		},
 		{
 			"ImportPath": "github.com/hashicorp/golang-lru",
-			"Rev": "a0d98a5f288019575c6d1f4bb1573fef2d1fcdc4"
+			"Rev": "20f1fb78b0740ba8c3cb143a61e86ba5c8669768"
 		},
 		{
 			"ImportPath": "github.com/hashicorp/golang-lru/simplelru",
-			"Rev": "a0d98a5f288019575c6d1f4bb1573fef2d1fcdc4"
+			"Rev": "20f1fb78b0740ba8c3cb143a61e86ba5c8669768"
 		},
 		{
 			"ImportPath": "github.com/json-iterator/go",
@@ -172,11 +172,11 @@
 		},
 		{
 			"ImportPath": "k8s.io/klog",
-			"Rev": "8139d8cb77af419532b33dfa7dd09fbc5f1d344f"
+			"Rev": "8e90cee79f823779174776412c13478955131846"
 		},
 		{
 			"ImportPath": "k8s.io/kube-openapi/pkg/util/proto",
-			"Rev": "d7c86cdc46e3a4fcf892b32dd7bc3aa775e0870e"
+			"Rev": "b3a7cee44a305be0a69e1b9ac03018307287e1b0"
 		},
 		{
 			"ImportPath": "sigs.k8s.io/yaml",

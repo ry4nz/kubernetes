@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	phaseutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
-	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	tokenphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/bootstraptoken/node"
 	kubeadmutil "k8s.io/kubernetes/cmd/kubeadm/app/util"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient"
@@ -52,7 +51,7 @@ import (
 
 // NewCmdToken returns cobra.Command for token management
 func NewCmdToken(out io.Writer, errW io.Writer) *cobra.Command {
-	kubeConfigFile := kubeadmconstants.GetAdminKubeConfigPath()
+	var kubeConfigFile string
 	var dryRun bool
 	tokenCmd := &cobra.Command{
 		Use:   "token",
@@ -121,7 +120,7 @@ func NewCmdToken(out io.Writer, errW io.Writer) *cobra.Command {
 			kubeadmutil.CheckErr(err)
 
 			klog.V(1).Infoln("[token] getting Clientsets from kubeconfig file")
-			kubeConfigFile = cmdutil.FindExistingKubeConfig(kubeConfigFile)
+			kubeConfigFile = cmdutil.GetKubeConfigPath(kubeConfigFile)
 			client, err := getClientset(kubeConfigFile, dryRun)
 			kubeadmutil.CheckErr(err)
 
@@ -148,7 +147,7 @@ func NewCmdToken(out io.Writer, errW io.Writer) *cobra.Command {
 			This command will list all bootstrap tokens for you.
 		`),
 		Run: func(tokenCmd *cobra.Command, args []string) {
-			kubeConfigFile = cmdutil.FindExistingKubeConfig(kubeConfigFile)
+			kubeConfigFile = cmdutil.GetKubeConfigPath(kubeConfigFile)
 			client, err := getClientset(kubeConfigFile, dryRun)
 			kubeadmutil.CheckErr(err)
 
@@ -172,7 +171,7 @@ func NewCmdToken(out io.Writer, errW io.Writer) *cobra.Command {
 			if len(args) < 1 {
 				kubeadmutil.CheckErr(errors.Errorf("missing subcommand; 'token delete' is missing token of form %q", bootstrapapi.BootstrapTokenIDPattern))
 			}
-			kubeConfigFile = cmdutil.FindExistingKubeConfig(kubeConfigFile)
+			kubeConfigFile = cmdutil.GetKubeConfigPath(kubeConfigFile)
 			client, err := getClientset(kubeConfigFile, dryRun)
 			kubeadmutil.CheckErr(err)
 
@@ -229,7 +228,11 @@ func RunCreateToken(out io.Writer, client clientset.Interface, cfgPath string, c
 	// if --print-join-command was specified, print the full `kubeadm join` command
 	// otherwise, just print the token
 	if printJoinCommand {
-		joinCommand, err := cmdutil.GetJoinCommand(kubeConfigFile, internalcfg.BootstrapTokens[0].Token.String(), false)
+		key := ""
+		skipTokenPrint := false
+		uploadCerts := false
+		skipCertificateKeyPrint := false
+		joinCommand, err := cmdutil.GetJoinCommand(kubeConfigFile, internalcfg.BootstrapTokens[0].Token.String(), key, skipTokenPrint, uploadCerts, skipCertificateKeyPrint)
 		if err != nil {
 			return errors.Wrap(err, "failed to get join command")
 		}

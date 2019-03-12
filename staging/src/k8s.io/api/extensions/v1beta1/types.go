@@ -18,7 +18,7 @@ package v1beta1
 
 import (
 	appsv1beta1 "k8s.io/api/apps/v1beta1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -229,7 +229,7 @@ type RollingUpdateDeployment struct {
 	// the rolling update starts, such that the total number of old and new pods do not exceed
 	// 130% of desired pods. Once old pods have been killed,
 	// new RC can be scaled up further, ensuring that total number of pods running
-	// at any time during the update is atmost 130% of desired pods.
+	// at any time during the update is at most 130% of desired pods.
 	// +optional
 	MaxSurge *intstr.IntOrString `json:"maxSurge,omitempty" protobuf:"bytes,2,opt,name=maxSurge"`
 }
@@ -541,6 +541,7 @@ type DaemonSetList struct {
 // endpoints defined by a backend. An Ingress can be configured to give services
 // externally-reachable urls, load balance traffic, terminate SSL, offer name
 // based virtual hosting etc.
+// DEPRECATED - This group version of Ingress is deprecated by networking.k8s.io/v1beta1 Ingress. See the release notes for more information.
 type Ingress struct {
 	metav1.TypeMeta `json:",inline"`
 	// Standard object's metadata.
@@ -927,6 +928,10 @@ type PodSecurityPolicySpec struct {
 	// is allowed in the "volumes" field.
 	// +optional
 	AllowedFlexVolumes []AllowedFlexVolume `json:"allowedFlexVolumes,omitempty" protobuf:"bytes,18,rep,name=allowedFlexVolumes"`
+	// AllowedCSIDrivers is a whitelist of inline CSI drivers that must be explicitly set to be embedded within a pod spec.
+	// An empty value means no CSI drivers can run inline within a pod spec.
+	// +optional
+	AllowedCSIDrivers []AllowedCSIDriver `json:"allowedCSIDrivers,omitempty" protobuf:"bytes,23,rep,name=allowedCSIDrivers"`
 	// allowedUnsafeSysctls is a list of explicitly allowed unsafe sysctls, defaults to none.
 	// Each entry is either a plain sysctl name or ends in "*" in which case it is considered
 	// as a prefix of allowed sysctls. Single * means all unsafe sysctls are allowed.
@@ -997,6 +1002,7 @@ var (
 	ConfigMap             FSType = "configMap"
 	Quobyte               FSType = "quobyte"
 	AzureDisk             FSType = "azureDisk"
+	CSI                   FSType = "csi"
 	All                   FSType = "*"
 )
 
@@ -1005,6 +1011,12 @@ var (
 type AllowedFlexVolume struct {
 	// driver is the name of the Flexvolume driver.
 	Driver string `json:"driver" protobuf:"bytes,1,opt,name=driver"`
+}
+
+// AllowedCSIDriver represents a single inline CSI Driver that is allowed to be used.
+type AllowedCSIDriver struct {
+	// Name is the registered name of the CSI driver
+	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
 }
 
 // HostPortRange defines a range of host ports that will be enabled by a policy
