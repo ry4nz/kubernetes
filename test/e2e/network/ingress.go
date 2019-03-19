@@ -427,7 +427,8 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 			// TODO(nikhiljindal): Check the instance group annotation value and verify with a multizone cluster.
 		})
 
-		It("should be able to switch between HTTPS and HTTP2 modes", func() {
+		// TODO: remove [Unreleased] tag to once the new GCE API GO client gets revendored in ingress-gce repo
+		It("should be able to switch between HTTPS and HTTP2 modes [Unreleased]", func() {
 			httpsScheme := "request_scheme=https"
 
 			By("Create a basic HTTP2 ingress")
@@ -529,9 +530,10 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 				_, err = f.ClientSet.CoreV1().Services(ns).Update(&svc)
 				Expect(err).NotTo(HaveOccurred())
 			}
-			wait.Poll(5*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
-				return gceController.BackendServiceUsingIG(jig.GetServicePorts(true))
+			err = wait.Poll(5*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
+				return gceController.BackendServiceUsingIG(jig.GetServicePorts(false))
 			})
+			Expect(err).NotTo(HaveOccurred(), "Expect backend service to target IG, but failed to observe")
 			jig.WaitForIngress(true)
 
 			By("Switch backend service to use NEG")
@@ -542,9 +544,10 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 				_, err = f.ClientSet.CoreV1().Services(ns).Update(&svc)
 				Expect(err).NotTo(HaveOccurred())
 			}
-			wait.Poll(5*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
+			err = wait.Poll(5*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
 				return gceController.BackendServiceUsingNEG(jig.GetServicePorts(false))
 			})
+			Expect(err).NotTo(HaveOccurred(), "Expect backend service to target NEG, but failed to observe")
 			jig.WaitForIngress(true)
 		})
 
@@ -556,7 +559,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 			svcPorts := jig.GetServicePorts(false)
 			usingNEG, err := gceController.BackendServiceUsingNEG(svcPorts)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(usingNEG).To(BeTrue())
+			Expect(usingNEG).To(BeTrue(), "Expect backend service to be using NEG. But not.")
 
 			// ClusterIP ServicePorts have no NodePort
 			for _, sp := range svcPorts {
@@ -574,18 +577,21 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 					_, err = f.ClientSet.AppsV1().Deployments(ns).UpdateScale(name, scale)
 					Expect(err).NotTo(HaveOccurred())
 				}
-				wait.Poll(10*time.Second, negUpdateTimeout, func() (bool, error) {
+				err = wait.Poll(10*time.Second, negUpdateTimeout, func() (bool, error) {
 					res, err := jig.GetDistinctResponseFromIngress()
 					if err != nil {
 						return false, nil
 					}
+					framework.Logf("Expecting %d backends, got %d", num, res.Len())
 					return res.Len() == num, nil
 				})
+				Expect(err).NotTo(HaveOccurred())
 			}
 
 			By("Create a basic HTTP ingress using NEG")
 			jig.CreateIngress(filepath.Join(ingress.IngressManifestPath, "neg"), ns, map[string]string{}, map[string]string{})
 			jig.WaitForIngress(true)
+			jig.WaitForIngressToStable()
 			usingNEG, err := gceController.BackendServiceUsingNEG(jig.GetServicePorts(false))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(usingNEG).To(BeTrue())
@@ -611,6 +617,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 			By("Create a basic HTTP ingress using NEG")
 			jig.CreateIngress(filepath.Join(ingress.IngressManifestPath, "neg"), ns, map[string]string{}, map[string]string{})
 			jig.WaitForIngress(true)
+			jig.WaitForIngressToStable()
 			usingNEG, err := gceController.BackendServiceUsingNEG(jig.GetServicePorts(false))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(usingNEG).To(BeTrue())
@@ -621,13 +628,15 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 			scale.Spec.Replicas = int32(replicas)
 			_, err = f.ClientSet.AppsV1().Deployments(ns).UpdateScale(name, scale)
 			Expect(err).NotTo(HaveOccurred())
-			wait.Poll(10*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
+
+			err = wait.Poll(10*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
 				res, err := jig.GetDistinctResponseFromIngress()
 				if err != nil {
 					return false, nil
 				}
 				return res.Len() == replicas, nil
 			})
+			Expect(err).NotTo(HaveOccurred())
 
 			By("Trigger rolling update and observe service disruption")
 			deploy, err := f.ClientSet.AppsV1().Deployments(ns).Get(name, metav1.GetOptions{})
@@ -637,7 +646,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 			deploy.Spec.Template.Spec.TerminationGracePeriodSeconds = &gracePeriod
 			_, err = f.ClientSet.AppsV1().Deployments(ns).Update(deploy)
 			Expect(err).NotTo(HaveOccurred())
-			wait.Poll(10*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
+			err = wait.Poll(10*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
 				res, err := jig.GetDistinctResponseFromIngress()
 				Expect(err).NotTo(HaveOccurred())
 				deploy, err := f.ClientSet.AppsV1().Deployments(ns).Get(name, metav1.GetOptions{})
@@ -655,6 +664,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 					return false, nil
 				}
 			})
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should sync endpoints for both Ingress-referenced NEG and standalone NEG", func() {
@@ -669,7 +679,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 					_, err = f.ClientSet.AppsV1().Deployments(ns).UpdateScale(name, scale)
 					Expect(err).NotTo(HaveOccurred())
 				}
-				wait.Poll(10*time.Second, negUpdateTimeout, func() (bool, error) {
+				err = wait.Poll(10*time.Second, negUpdateTimeout, func() (bool, error) {
 					svc, err := f.ClientSet.CoreV1().Services(ns).Get(name, metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred())
 
@@ -716,6 +726,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 
 					return true, nil
 				})
+				Expect(err).NotTo(HaveOccurred())
 			}
 
 			By("Create a basic HTTP ingress using NEG")
@@ -894,7 +905,7 @@ var _ = SIGDescribe("Loadbalancing: L7", func() {
 		It("single and multi-cluster ingresses should be able to exist together", func() {
 			By("Creating a single cluster ingress first")
 			jig.Class = ""
-			singleIngFilePath := filepath.Join(ingress.IngressManifestPath, "static-ip-2")
+			singleIngFilePath := filepath.Join(ingress.GCEIngressManifestPath, "static-ip-2")
 			jig.CreateIngress(singleIngFilePath, ns, map[string]string{}, map[string]string{})
 			jig.WaitForIngress(false /*waitForNodePort*/)
 			// jig.Ingress will be overwritten when we create MCI, so keep a reference.
@@ -1108,7 +1119,7 @@ func detectHttpVersionAndSchemeTest(f *framework.Framework, jig *ingress.TestJig
 }
 
 func detectNegAnnotation(f *framework.Framework, jig *ingress.TestJig, gceController *gce.GCEIngressController, ns, name string, negs int) {
-	wait.Poll(5*time.Second, framework.LoadBalancerPollTimeout, func() (bool, error) {
+	if err := wait.Poll(5*time.Second, negUpdateTimeout, func() (bool, error) {
 		svc, err := f.ClientSet.CoreV1().Services(ns).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return false, nil
@@ -1150,5 +1161,7 @@ func detectNegAnnotation(f *framework.Framework, jig *ingress.TestJig, gceContro
 		}
 
 		return gceController.BackendServiceUsingNEG(jig.GetServicePorts(false))
-	})
+	}); err != nil {
+		Expect(err).NotTo(HaveOccurred())
+	}
 }
