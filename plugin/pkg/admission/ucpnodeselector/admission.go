@@ -98,7 +98,7 @@ type ucpNodeSelector struct {
 }
 
 // Admit handles resources that are passed through this admission controller
-func (a *ucpNodeSelector) Admit(attributes admission.Attributes) error {
+func (a *ucpNodeSelector) Admit(attributes admission.Attributes, o admission.ObjectInterfaces) error {
 	object := attributes.GetObject()
 
 	// Jobs don't support PodTemplateSpec updates and pods don't support
