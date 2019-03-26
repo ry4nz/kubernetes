@@ -128,7 +128,7 @@ func getOldImageSet(oldObject runtime.Object) map[string]struct{} {
 	return oldImageSet
 }
 
-func (a *signingPolicy) Admit(attributes admission.Attributes) (err error) {
+func (a *signingPolicy) Admit(attributes admission.Attributes, o admission.ObjectInterfaces) (err error) {
 	defer func() {
 		if err != nil {
 			log.Errorf("[DCT Signing Policy] error: %s", err)

@@ -105,7 +105,7 @@ func TestAdmissionKubernetesTolerations(t *testing.T) {
 				kind := schema.GroupVersionKind{}
 				resource := schema.GroupVersionResource{}
 				user := &user.DefaultInfo{Name: c.user}
-				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, c.namespace, "name", resource, "", operation, false, user))
+				err := handler.Admit(admission.NewAttributesRecord(o, nil, kind, c.namespace, "name", resource, "", operation, false, user), nil)
 				require.NoError(err, "Object type: %T\n", o)
 
 				expected := c.expectedTolerations
