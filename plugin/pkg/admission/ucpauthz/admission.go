@@ -184,7 +184,7 @@ func ParamsFromPodSpec(podSpec *api.PodSpec) *authzParameters {
 	return resp
 }
 
-func (a *ucpAuthz) Admit(attributes admission.Attributes) (err error) {
+func (a *ucpAuthz) Admit(attributes admission.Attributes, o admission.ObjectInterfaces) (err error) {
 	user := attributes.GetUserInfo().GetName()
 	namespace := attributes.GetNamespace()
 	log.Debugf("the user is: %s", user)

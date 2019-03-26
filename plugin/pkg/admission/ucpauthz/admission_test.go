@@ -45,7 +45,7 @@ func TestStackAnnotation(t *testing.T) {
 		userAnnotationKey: "otheruser",
 	})
 
-	err := handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}), nil)
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 
@@ -55,7 +55,7 @@ func TestStackAnnotation(t *testing.T) {
 	stack.SetNamespace("default")
 	stack.SetAnnotations(make(map[string]string))
 
-	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "testuser"}), nil)
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 
@@ -67,7 +67,7 @@ func TestStackAnnotation(t *testing.T) {
 		userAnnotationKey: "testuser",
 	})
 
-	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: composeUser}))
+	err = handler.Admit(admission.NewAttributesRecord(stack, nil, api.Kind("Stack").WithVersion("version"), stack.GetNamespace(), stack.GetName(), api.Resource("stacks").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: composeUser}), nil)
 	require.NoError(err)
 	require.Equal(stack.GetAnnotations()[userAnnotationKey], "testuser")
 }
@@ -116,20 +116,20 @@ func TestAdmission(t *testing.T) {
 		},
 	}
 	// Test1: user is admin, service account is used
-	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 
 	// Test 2: user is not admin, service account is used
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}), nil)
 	require.NoError(err)
 
 	// Test 3: user is a system component, service account is used
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "systemprefix:controllermanager"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "systemprefix:controllermanager"}), nil)
 	require.NoError(err)
 
 	// Test 4: user is a system component with the wrong prefix, service
 	// account is used.
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "other:systemprefix:controllermanager"}), nil)
 	require.NoError(err)
 
 	// Test 6: user is not an admin, no service account is used
@@ -139,7 +139,7 @@ func TestAdmission(t *testing.T) {
 			Containers: []api.Container{},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "notadmin"}), nil)
 	require.NoError(err)
 
 	// Test 7: non-admin user has privileged permissions, no service account is
@@ -158,19 +158,19 @@ func TestAdmission(t *testing.T) {
 			},
 		},
 	}
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "candoprivileged"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "candoprivileged"}), nil)
 	require.NoError(err)
 
 	// Test 8: non-admin user does not have privileged permissions, no service
 	// account is used, pod uses privileged mode.
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}), nil)
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to use")
 
 	// Test 9: non-admin user does not have privileged permissions but
 	// the pod's service account does.
 	pod.Spec.ServiceAccountName = "foobar"
-	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}))
+	err = handler.Admit(admission.NewAttributesRecord(&pod, nil, api.Kind("Pod").WithVersion("version"), pod.Namespace, pod.Name, api.Resource("pods").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "cannotdoprivileged"}), nil)
 	require.NoError(err)
 }
 
@@ -406,17 +406,17 @@ func TestAdmissionServiceAccountDeletion(t *testing.T) {
 
 	sa := api.ServiceAccount{}
 	// Delete a service account and get a 204 from the service agent deletion.
-	err := handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 
 	// Delete a service account and get a 500 from the service agent deletion.
-	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Delete, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.Error(err)
 	require.Equal(err.Error(), "failed to delete agent: server responded with status 500: some error")
 
 	// Update a service account and don't expect to hit the service agent
 	// deletion backend.
-	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&sa, nil, api.Kind("ServiceAccount").WithVersion("version"), "default", "superservice", api.Resource("serviceaccounts").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 }
 
@@ -500,33 +500,33 @@ func TestPersistentVolumeLocalCreate(t *testing.T) {
 		},
 	}
 	// Test1: user is admin, local PV is created
-	err := handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
+	err := handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 
 	// Test 2: user is admin, host path PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 
 	// Test 3: user is admin, non-local PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "adminuser"}), nil)
 	require.NoError(err)
 
 	// Test 4: user is non-admin, non-local PV is created
-	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&nonLocalPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}), nil)
 	require.NoError(err)
 
 	// Test 5: user is non-admin, local PV is blocked
-	err = handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&localPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}), nil)
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
 	// Test 6: user is non-admin, host path PV is blocked
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, &user.DefaultInfo{Name: "nonadminuser"}), nil)
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
 	// Test 7: user is non-admin, host path PV is blocked for update
-	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "nonadminuser"}))
+	err = handler.Admit(admission.NewAttributesRecord(&hostPathPV, nil, api.Kind("PersistentVolume").WithVersion("version"), namespace, "123", api.Resource("persistentvolumes").WithVersion("version"), "", admission.Update, false, &user.DefaultInfo{Name: "nonadminuser"}), nil)
 	require.Error(err)
 	require.Contains(err.Error(), "does not have permissions to create local PersistentVolumes")
 
